@@ -1,0 +1,26 @@
+{
+  "name": "whatsapp-collector",
+  "version": "1.0.0",
+  "description": "WhatsApp message collector service for Whatsapp-Memories",
+  "main": "dist/WhatsAppCollectorService.js",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/WhatsAppCollectorService.js",
+    "dev": "ts-node src/WhatsAppCollectorService.ts"
+  },
+  "keywords": ["whatsapp", "collector", "redis", "memories"],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "qrcode-terminal": "^0.12.0",
+    "redis": "^5.5.6",
+    "whatsapp-web.js": "^1.34.1"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.11",
+    "@types/qrcode-terminal": "^0.12.2",
+    "puppeteer": "^18.2.1",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.5.3"
+  }
+}
