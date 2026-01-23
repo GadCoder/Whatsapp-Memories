@@ -1,0 +1,64 @@
+services:
+  redis:
+    image: "redis:alpine"
+    container_name: whatsapp-memories-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    networks:
+      - whatsapp-memories-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+
+  whatsapp-collector:
+    build:
+      context: ./services/whatsapp-collector
+      dockerfile: Dockerfile
+    container_name: whatsapp-collector
+    depends_on:
+      redis:
+        condition: service_healthy
+    environment:
+      # Redis Configuration
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      
+      # Puppeteer Configuration
+      - PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
+      
+      # Filter Configuration
+      - FILTER_MODE=all                    # Options: all, allowlist, blocklist
+      # - FILTER_CONTACTS=1234567890,0987654321  # Comma-separated (for allowlist/blocklist)
+      - FILTER_GROUPS=include              # Options: include, exclude, only
+      - FILTER_BROADCAST=false             # Include broadcast messages?
+      
+      # Retry Configuration
+      - RETRY_MAX_ATTEMPTS=3
+      - RETRY_INITIAL_DELAY=1000           # milliseconds
+      - RETRY_MAX_DELAY=10000              # milliseconds
+      - RETRY_BACKOFF_MULTIPLIER=2
+      
+      # Queue Configuration
+      - QUEUE_MAX_SIZE=1000                # Max messages to queue locally
+      - QUEUE_FLUSH_INTERVAL=60000         # milliseconds (1 minute)
+      
+      # Debug
+      - DEBUG=true                         # Enable debug logging (set to false in production)
+    volumes:
+      # Persist WhatsApp authentication session
+      - ./services/whatsapp-collector/.wwebjs_auth:/usr/src/app/.wwebjs_auth
+    networks:
+      - whatsapp-memories-network
+    restart: on-failure:5                  # Restart max 5 times on failure
+
+volumes:
+  redis-data:
+
+networks:
+  whatsapp-memories-network:
+    driver: bridge
