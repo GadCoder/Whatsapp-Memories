@@ -9,6 +9,12 @@ CREATE TABLE IF NOT EXISTS messages (
     sender TEXT NOT NULL,
     author TEXT,
     text TEXT NOT NULL,
+    
+    -- Contact information (self-healing: added via ALTER TABLE for existing deployments)
+    sender_name TEXT,
+    sender_pushname TEXT,
+    sender_number TEXT,
+    
     message_type TEXT NOT NULL,
     timestamp TIMESTAMPTZ NOT NULL,
     
@@ -45,6 +51,31 @@ CREATE TABLE IF NOT EXISTS messages (
     -- Timestamps
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
+
+-- Self-healing: Add contact columns if they don't exist (for existing deployments)
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns 
+        WHERE table_name = 'messages' AND column_name = 'sender_name' AND table_schema = 'public'
+    ) THEN
+        ALTER TABLE messages ADD COLUMN sender_name TEXT;
+    END IF;
+
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns 
+        WHERE table_name = 'messages' AND column_name = 'sender_pushname' AND table_schema = 'public'
+    ) THEN
+        ALTER TABLE messages ADD COLUMN sender_pushname TEXT;
+    END IF;
+
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns 
+        WHERE table_name = 'messages' AND column_name = 'sender_number' AND table_schema = 'public'
+    ) THEN
+        ALTER TABLE messages ADD COLUMN sender_number TEXT;
+    END IF;
+END $$;
 
 -- Indexes for efficient querying
 CREATE INDEX IF NOT EXISTS idx_messages_chat_id ON messages(chat_id);
