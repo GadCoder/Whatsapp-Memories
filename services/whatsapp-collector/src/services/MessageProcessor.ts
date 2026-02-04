@@ -55,6 +55,30 @@ export class MessageProcessor {
     // Extract mentions
     const mentionedIds = message.mentionedIds || [];
 
+    // Get contact info (name, pushname, formatted number)
+    let senderName: string | undefined;
+    let senderPushname: string | undefined;
+    let senderNumber: string | undefined;
+
+    try {
+      const contact = await message.getContact();
+      senderName = contact.name || undefined;
+      senderPushname = contact.pushname || undefined;
+      
+      // Get formatted phone number (e.g., "+51 912 345 678")
+      try {
+        senderNumber = await contact.getFormattedNumber();
+      } catch (formatError) {
+        // Fallback: format from sender ID
+        senderNumber = message.from.replace('@c.us', '').replace('@g.us', '');
+      }
+    } catch (error) {
+      logger.warn('Failed to get contact info', {
+        error: (error as Error).message,
+        messageId: message.id._serialized,
+      });
+    }
+
     const processed: WhatsAppMessage = {
       messageId: message.id._serialized,
       chatId: message.from,
@@ -75,6 +99,10 @@ export class MessageProcessor {
       groupName,
       participantCount,
       ack: message.ack,
+      // Contact information
+      senderName,
+      senderPushname,
+      senderNumber,
     };
 
     logger.debug('Processed message', {
@@ -85,6 +113,7 @@ export class MessageProcessor {
       hasQuotedMsg: message.hasQuotedMsg,
       isForwarded: message.isForwarded,
       mentionsCount: mentionedIds.length,
+      hasContactInfo: !!(senderName || senderPushname),
     });
 
     return processed;

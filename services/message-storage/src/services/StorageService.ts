@@ -39,6 +39,9 @@ export class StorageService {
         sender,
         author,
         text,
+        sender_name,
+        sender_pushname,
+        sender_number,
         message_type,
         timestamp,
         is_group,
@@ -62,7 +65,7 @@ export class StorageService {
       ) VALUES (
         $1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
         $11, $12, $13, $14, $15, $16, $17, $18, $19, $20,
-        $21, $22, $23, $24, $25
+        $21, $22, $23, $24, $25, $26, $27, $28
       )
       ON CONFLICT (message_id) DO NOTHING
     `;
@@ -81,6 +84,9 @@ export class StorageService {
       message.from,
       message.author || null,
       message.text,
+      message.senderName || null,
+      message.senderPushname || null,
+      message.senderNumber || null,
       message.messageType,
       timestamp,
       message.isGroup,
