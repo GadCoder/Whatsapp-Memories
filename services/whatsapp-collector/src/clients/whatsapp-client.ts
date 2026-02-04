@@ -13,7 +13,6 @@ class WhatsAppClient {
   private constructor() {
     const clientOptions: ClientOptions = {
       authStrategy: new LocalAuth(),
-      webVersionCache: { type: 'local' },
       puppeteer: {
         headless: true,
         executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || '/usr/bin/chromium',
@@ -24,6 +23,7 @@ class WhatsAppClient {
           '--disable-accelerated-2d-canvas',
           '--no-first-run',
           '--no-zygote',
+          '--single-process',
           '--disable-gpu',
         ],
       },
@@ -54,6 +54,15 @@ class WhatsAppClient {
 
     this.client.on('ready', () => {
       logger.info('WhatsApp client is ready!');
+      logger.info('Client ready - all systems go for message listening');
+    });
+
+    this.client.on('loading_screen', (percent: number, message: string) => {
+      logger.info(`Loading screen: ${percent}% - ${message}`);
+    });
+
+    this.client.on('change_state', (state: string) => {
+      logger.info(`Client state changed to: ${state}`);
     });
 
     try {

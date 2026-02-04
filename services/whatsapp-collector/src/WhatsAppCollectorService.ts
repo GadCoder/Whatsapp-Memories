@@ -37,27 +37,11 @@ async function startCollector() {
 
   // Initialize WhatsApp client
   let isClientReady = false;
-  try {
-    await whatsAppClient.initialize();
-    isClientReady = true;
-    logger.info('WhatsApp client is ready, listening for messages...');
-  } catch (error) {
-    logger.error('Failed to initialize WhatsApp client, exiting', { 
-      error: error instanceof Error ? error.message : String(error),
-      stack: error instanceof Error ? error.stack : undefined
-    });
-    await publisher.disconnect();
-    process.exit(1);
-  }
-
-  // Listen for messages (incoming and outgoing)
-  // 'message_create' fires for all messages including ones sent by us
-  whatsAppClient.client.on('message_create', async (message: Message) => {
-    if (!isClientReady) {
-      logger.warn('Message received but client not ready, ignoring');
-      return;
-    }
-
+  
+  // Helper function to handle messages
+  const handleMessage = async (message: Message, eventType: string) => {
+    logger.info(`${eventType} event fired!`, { messageId: message.id._serialized });
+    
     try {
       const direction = message.fromMe ? 'outgoing' : 'incoming';
       logger.info(`Received ${direction} message from ${message.from}`);
@@ -102,7 +86,51 @@ async function startCollector() {
         from: message.from,
       });
     }
+  };
+
+  // Set up message listeners BEFORE initializing (this is critical!)
+  logger.info('Setting up message event listeners...');
+  
+  // message_create fires for all messages (incoming and outgoing)
+  whatsAppClient.client.on('message_create', async (message: Message) => {
+    await handleMessage(message, 'message_create');
   });
+  
+  // message fires only for incoming messages
+  whatsAppClient.client.on('message', async (message: Message) => {
+    await handleMessage(message, 'message');
+  });
+
+  // Wait for the ready event to mark client as ready
+  whatsAppClient.client.on('ready', () => {
+    isClientReady = true;
+    logger.info('READY EVENT FIRED - Client marked as ready');
+  });
+  
+  // Also mark as ready on authenticated as fallback
+  whatsAppClient.client.on('authenticated', () => {
+    logger.info('AUTHENTICATED EVENT FIRED');
+    // Give it a moment then mark as ready if ready event hasn't fired
+    setTimeout(() => {
+      if (!isClientReady) {
+        isClientReady = true;
+        logger.info('Marking client as ready after authentication (ready event did not fire)');
+      }
+    }, 5000);
+  });
+
+  // Now initialize the client
+  try {
+    await whatsAppClient.initialize();
+    logger.info('WhatsApp client initialization complete');
+  } catch (error) {
+    logger.error('Failed to initialize WhatsApp client, exiting', { 
+      error: error instanceof Error ? error.message : String(error),
+      stack: error instanceof Error ? error.stack : undefined
+    });
+    await publisher.disconnect();
+    process.exit(1);
+  }
 
   logger.info('========================================');
   logger.info('WhatsApp Collector Service is running');
