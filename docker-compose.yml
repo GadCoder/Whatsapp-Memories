@@ -2,8 +2,7 @@ services:
   redis:
     image: "redis:alpine"
     container_name: whatsapp-memories-redis
-    ports:
-      - "6379:6379"
+    # Ports removed - internal communication only for Dokploy compatibility
     volumes:
       - redis-data:/data
     networks:
@@ -18,8 +17,7 @@ services:
   postgres:
     image: pgvector/pgvector:pg16
     container_name: whatsapp-memories-postgres
-    ports:
-      - "5432:5432"
+    # Ports removed - internal communication only for Dokploy compatibility
     environment:
       - POSTGRES_DB=${POSTGRES_DB:-memories}
       - POSTGRES_USER=${POSTGRES_USER:-memories}
