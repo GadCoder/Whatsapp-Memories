@@ -15,6 +15,26 @@ services:
       retries: 5
     restart: unless-stopped
 
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: whatsapp-memories-postgres
+    ports:
+      - "5432:5432"
+    environment:
+      - POSTGRES_DB=${POSTGRES_DB:-memories}
+      - POSTGRES_USER=${POSTGRES_USER:-memories}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-memories}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    networks:
+      - whatsapp-memories-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-memories} -d ${POSTGRES_DB:-memories}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
   whatsapp-collector:
     build:
       context: ./services/whatsapp-collector
@@ -56,8 +76,49 @@ services:
       - whatsapp-memories-network
     restart: on-failure:5                  # Restart max 5 times on failure
 
+  message-storage:
+    build:
+      context: ./services/message-storage
+      dockerfile: Dockerfile
+    container_name: message-storage
+    depends_on:
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    environment:
+      # Redis Configuration
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      
+      # PostgreSQL Configuration
+      - POSTGRES_HOST=postgres
+      - POSTGRES_PORT=5432
+      - POSTGRES_DB=${POSTGRES_DB:-memories}
+      - POSTGRES_USER=${POSTGRES_USER:-memories}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-memories}
+      
+      # Embedding Provider Configuration
+      - EMBEDDING_PROVIDER=${EMBEDDING_PROVIDER:-openai}
+      - EMBEDDING_FALLBACK_PROVIDER=${EMBEDDING_FALLBACK_PROVIDER:-}
+      
+      # OpenAI Configuration
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - OPENAI_EMBEDDING_MODEL=${OPENAI_EMBEDDING_MODEL:-text-embedding-3-small}
+      
+      # Google Gemini Configuration (optional)
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
+      - GEMINI_EMBEDDING_MODEL=${GEMINI_EMBEDDING_MODEL:-text-embedding-004}
+      
+      # Debug
+      - DEBUG=${DEBUG:-false}
+    networks:
+      - whatsapp-memories-network
+    restart: unless-stopped
+
 volumes:
   redis-data:
+  postgres-data:
 
 networks:
   whatsapp-memories-network:

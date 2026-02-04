@@ -1,0 +1,28 @@
+{
+  "name": "message-storage",
+  "version": "1.0.0",
+  "description": "Message storage service with vector embeddings for RAG",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "dev": "ts-node src/index.ts",
+    "test-embeddings": "ts-node scripts/test-embeddings.ts"
+  },
+  "keywords": ["whatsapp", "storage", "embeddings", "rag", "pgvector"],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@google/generative-ai": "^0.21.0",
+    "openai": "^4.77.0",
+    "pg": "^8.13.1",
+    "pgvector": "^0.2.0",
+    "redis": "^5.5.6"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.11",
+    "@types/pg": "^8.11.10",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.5.3"
+  }
+}
