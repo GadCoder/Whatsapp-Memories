@@ -68,8 +68,9 @@ services:
       # Debug
       - DEBUG=true                         # Enable debug logging (set to false in production)
     volumes:
-      # Persist WhatsApp authentication session
-      - ./services/whatsapp-collector/.wwebjs_auth:/usr/src/app/.wwebjs_auth
+      # Persist WhatsApp authentication session using named volume
+      # Named volume survives git clones and container rebuilds (unlike bind mount)
+      - wwebjs-auth:/usr/src/app/.wwebjs_auth
     networks:
       - whatsapp-memories-network
     restart: on-failure:5                  # Restart max 5 times on failure
@@ -117,6 +118,7 @@ services:
 volumes:
   redis-data:
   postgres-data:
+  wwebjs-auth:  # Named volume for WhatsApp session persistence
 
 networks:
   whatsapp-memories-network:
