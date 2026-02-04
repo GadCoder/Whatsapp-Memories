@@ -55,6 +55,41 @@ export class MessageProcessor {
     // Extract mentions
     const mentionedIds = message.mentionedIds || [];
 
+    // Get contact info (name, pushname, formatted number)
+    let senderName: string | undefined;
+    let senderPushname: string | undefined;
+    let senderNumber: string | undefined;
+
+    try {
+      const contact = await message.getContact();
+      senderName = contact.name || undefined;
+      senderPushname = contact.pushname || undefined;
+      
+      // Get formatted phone number (e.g., "+51 912 345 678")
+      try {
+        senderNumber = await contact.getFormattedNumber();
+      } catch (formatError) {
+        // Fallback: derive from sender/contact ID
+        // For group messages, message.from is the group ID, so use author or contact ID
+        let rawId: string | undefined;
+        if (isGroup) {
+          // In groups, use author (actual sender) or contact ID
+          rawId = message.author ?? contact.id?._serialized;
+        } else {
+          // In direct chats, message.from is the peer's JID
+          rawId = message.from ?? contact.id?._serialized;
+        }
+        if (rawId) {
+          senderNumber = rawId.replace('@c.us', '').replace('@g.us', '');
+        }
+      }
+    } catch (error) {
+      logger.warn('Failed to get contact info', {
+        error: (error as Error).message,
+        messageId: message.id._serialized,
+      });
+    }
+
     const processed: WhatsAppMessage = {
       messageId: message.id._serialized,
       chatId: message.from,
@@ -75,6 +110,10 @@ export class MessageProcessor {
       groupName,
       participantCount,
       ack: message.ack,
+      // Contact information
+      senderName,
+      senderPushname,
+      senderNumber,
     };
 
     logger.debug('Processed message', {
@@ -85,6 +124,7 @@ export class MessageProcessor {
       hasQuotedMsg: message.hasQuotedMsg,
       isForwarded: message.isForwarded,
       mentionsCount: mentionedIds.length,
+      hasContactInfo: !!(senderName || senderPushname),
     });
 
     return processed;

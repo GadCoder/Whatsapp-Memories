@@ -22,6 +22,11 @@ export interface WhatsAppMessage {
   hasMedia: boolean;
   messageType: MessageType;
 
+  // Contact information
+  senderName?: string; // Contact name as saved in your phone
+  senderPushname?: string; // Contact's public display name
+  senderNumber?: string; // Formatted phone number (+51 912 345 678)
+
   // Additional metadata
   author?: string;
   isForwarded: boolean;
