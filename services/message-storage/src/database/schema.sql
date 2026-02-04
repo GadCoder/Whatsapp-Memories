@@ -57,21 +57,21 @@ DO $$
 BEGIN
     IF NOT EXISTS (
         SELECT 1 FROM information_schema.columns 
-        WHERE table_name = 'messages' AND column_name = 'sender_name'
+        WHERE table_name = 'messages' AND column_name = 'sender_name' AND table_schema = 'public'
     ) THEN
         ALTER TABLE messages ADD COLUMN sender_name TEXT;
     END IF;
 
     IF NOT EXISTS (
         SELECT 1 FROM information_schema.columns 
-        WHERE table_name = 'messages' AND column_name = 'sender_pushname'
+        WHERE table_name = 'messages' AND column_name = 'sender_pushname' AND table_schema = 'public'
     ) THEN
         ALTER TABLE messages ADD COLUMN sender_pushname TEXT;
     END IF;
 
     IF NOT EXISTS (
         SELECT 1 FROM information_schema.columns 
-        WHERE table_name = 'messages' AND column_name = 'sender_number'
+        WHERE table_name = 'messages' AND column_name = 'sender_number' AND table_schema = 'public'
     ) THEN
         ALTER TABLE messages ADD COLUMN sender_number TEXT;
     END IF;

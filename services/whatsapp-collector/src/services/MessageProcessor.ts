@@ -69,8 +69,19 @@ export class MessageProcessor {
       try {
         senderNumber = await contact.getFormattedNumber();
       } catch (formatError) {
-        // Fallback: format from sender ID
-        senderNumber = message.from.replace('@c.us', '').replace('@g.us', '');
+        // Fallback: derive from sender/contact ID
+        // For group messages, message.from is the group ID, so use author or contact ID
+        let rawId: string | undefined;
+        if (isGroup) {
+          // In groups, use author (actual sender) or contact ID
+          rawId = message.author ?? contact.id?._serialized;
+        } else {
+          // In direct chats, message.from is the peer's JID
+          rawId = message.from ?? contact.id?._serialized;
+        }
+        if (rawId) {
+          senderNumber = rawId.replace('@c.us', '').replace('@g.us', '');
+        }
       }
     } catch (error) {
       logger.warn('Failed to get contact info', {
