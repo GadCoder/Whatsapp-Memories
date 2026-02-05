@@ -494,6 +494,47 @@ docker stats
 - Use secrets management in production (Docker secrets, Kubernetes secrets, etc.)
 - Rotate credentials regularly
 
+### Encryption at Rest
+
+The system supports AES-256-GCM encryption for sensitive message data:
+
+**Encrypted Fields:**
+- `text` - Message content
+- `sender_number` - Phone numbers (PII)
+- `author` - Raw WhatsApp IDs
+- `quoted_msg_body` - Quoted message content
+- `media_url` - Media file URLs
+- `caption` - Media captions
+- `mentioned_ids` - Mentioned user IDs
+
+**Queryable Fields (Plaintext):**
+- `sender_name` - Contact names (filterable)
+- `sender_pushname` - Display names
+- `timestamp` - Message timestamps
+- `group_name` - Group chat names
+- `embedding` - Vector embeddings (semantic search)
+
+**Setup:**
+
+1. Generate encryption key:
+   ```bash
+   openssl rand -hex 32
+   ```
+
+2. Add to environment:
+   ```bash
+   ENCRYPTION_KEY=your-64-character-hex-key
+   ```
+
+3. Restart services
+
+**⚠️ CRITICAL WARNINGS:**
+
+- **Key Loss = Data Loss**: If you lose the encryption key, encrypted data cannot be recovered. Back up the key securely (password manager, HSM, etc.).
+- **No Key Rotation**: Currently no built-in key rotation. Plan your key management strategy before deployment.
+- **Backward Compatible**: Existing plaintext messages remain readable. New messages are automatically encrypted.
+- **Performance**: ~3ms overhead per field encryption/decryption.
+
 ### Network Isolation
 
 - Services communicate via Docker network

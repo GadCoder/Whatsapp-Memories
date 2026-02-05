@@ -106,7 +106,7 @@ export class StorageService {
       message.hasQuotedMsg,                                            // $17 - PLAIN
       message.quotedMsgId || null,                                     // $18 - PLAIN
       this.encryptionService.encrypt(message.quotedMsgBody),           // $19 - ENCRYPTED (content)
-      message.mentionedIds || null,                                    // $20 - PLAIN
+      this.encryptionService.encryptArray(message.mentionedIds),        // $20 - ENCRYPTED (PII)
       message.hasMedia,                                                // $21 - PLAIN
       message.mediaType || null,                                       // $22 - PLAIN
       this.encryptionService.encrypt(message.mediaUrl),                // $23 - ENCRYPTED (URL)
@@ -249,6 +249,7 @@ export class StorageService {
       text: this.encryptionService.decrypt(row.text),
       sender_number: this.encryptionService.decrypt(row.sender_number),
       quoted_msg_body: this.encryptionService.decrypt(row.quoted_msg_body),
+      mentioned_ids: this.encryptionService.decryptArray(row.mentioned_ids),
       media_url: this.encryptionService.decrypt(row.media_url),
       caption: this.encryptionService.decrypt(row.caption),
       // sender_name, timestamp, group_name, etc. remain as-is (plaintext)
