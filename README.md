@@ -54,9 +54,9 @@ This project provides infrastructure for:
           │                            │                            │
           ▼                            ▼                            ▼
     ┌──────────┐              ┌──────────────┐           ┌────────────────┐
-    │  Storage │              │   Analytics  │           │  Your Service  │
-    │  Service │              │    Service   │           │   (Future)     │
-    │ (Future) │              │   (Future)   │           └────────────────┘
+    │  Message │              │   Analytics  │           │  Your Service  │
+    │  Storage │              │    Service   │           │   (Future)     │
+    │  Service │              │   (Future)   │           └────────────────┘
     └──────────┘              └──────────────┘
 ```
 
@@ -75,7 +75,26 @@ The core service that connects to WhatsApp Web and publishes messages to Redis.
 - Handles errors with retry and local queueing
 - Graceful shutdown with queue flush
 
+**Recent additions:**
+- ✅ Contact name capture (sender_name, sender_pushname, sender_number)
+- ✅ Session persistence with named volumes (no more QR rescans on deploy)
+
 [View Service Documentation →](services/whatsapp-collector/README.md)
+
+### Message Storage Service
+
+PostgreSQL-based storage service with vector embeddings for semantic search.
+
+**Features:**
+
+- Consumes messages from Redis
+- Stores messages in PostgreSQL with structured schema
+- Generates vector embeddings for semantic search (OpenAI, Gemini, or local)
+- Captures contact information (saved name, display name, phone number)
+- Self-healing database schema (adds columns automatically)
+- Supports pgvector for similarity search
+
+[View Service Documentation →](services/message-storage/README.md)
 
 ## Redis Channels
 
@@ -201,11 +220,16 @@ Each message published to Redis contains:
   // Core fields
   messageId: string,           // Unique message ID
   chatId: string,              // Chat ID
-  from: string,                // Sender
+  from: string,                // Sender (WhatsApp ID)
   author: string,              // Actual sender (different in groups)
   timestamp: Date,             // When sent
   text: string,                // Message body
   messageType: string,         // 'text', 'image', etc.
+
+  // Contact information
+  senderName?: string,         // Contact name as saved in your phone
+  senderPushname?: string,     // Contact's public display name
+  senderNumber?: string,       // Formatted phone number (+51 912 345 678)
 
   // Flags
   isGroup: boolean,            // Group chat?
@@ -239,6 +263,9 @@ Each message published to Redis contains:
   "author": "1234567890@c.us",
   "timestamp": "2026-01-22T21:30:00.000Z",
   "text": "Hello, world!",
+  "senderName": "John Doe",
+  "senderPushname": "John",
+  "senderNumber": "+51 912 345 678",
   "messageType": "text",
   "isGroup": false,
   "isBroadcast": false,
@@ -322,17 +349,29 @@ Each message published to Redis contains:
 ```
 Whatsapp-Memories/
 ├── services/
-│   └── whatsapp-collector/          # Message collection service
+│   ├── whatsapp-collector/          # Message collection service
+│   │   ├── src/
+│   │   │   ├── clients/              # WhatsApp Web client
+│   │   │   ├── services/             # Core business logic
+│   │   │   │   ├── FilterService.ts
+│   │   │   │   ├── PublisherService.ts
+│   │   │   │   └── MessageProcessor.ts
+│   │   │   ├── config/               # Configuration
+│   │   │   ├── types/                # TypeScript types
+│   │   │   ├── utils/                # Logger, retry logic
+│   │   │   └── WhatsAppCollectorService.ts  # Main entry
+│   │   ├── Dockerfile
+│   │   ├── package.json
+│   │   └── README.md
+│   │
+│   └── message-storage/             # PostgreSQL storage service
 │       ├── src/
-│       │   ├── clients/              # WhatsApp Web client
-│       │   ├── services/             # Core business logic
-│       │   │   ├── FilterService.ts
-│       │   │   ├── PublisherService.ts
-│       │   │   └── MessageProcessor.ts
-│       │   ├── config/               # Configuration
+│       │   ├── services/             # Storage logic
+│       │   │   ├── StorageService.ts
+│       │   │   └── EmbeddingService.ts
+│       │   ├── database/             # Connection, schema
 │       │   ├── types/                # TypeScript types
-│       │   ├── utils/                # Logger, retry logic
-│       │   └── WhatsAppCollectorService.ts  # Main entry
+│       │   └── config/               # Configuration
 │       ├── Dockerfile
 │       ├── package.json
 │       └── README.md
@@ -510,6 +549,9 @@ docker stats
 - [x] Message filtering
 - [x] Retry and queue logic
 - [x] Docker support
+- [x] **Message Storage Service** (PostgreSQL + pgvector)
+- [x] **Contact name capture** (sender_name, sender_pushname, sender_number)
+- [x] **Session persistence** (named Docker volumes)
 - [x] Comprehensive documentation
 
 ### v1.1 (Next)
@@ -519,15 +561,15 @@ docker stats
 - [ ] Dead letter queue for failed messages
 - [ ] Health check HTTP endpoint
 - [ ] Prometheus metrics
+- [ ] Search API (semantic + filter by sender/date)
 
 ### v2.0 (Future)
 
-- [ ] Message storage service (PostgreSQL/MongoDB)
-- [ ] Search service (Elasticsearch)
 - [ ] Web UI for viewing messages
 - [ ] Analytics dashboard
 - [ ] Message export functionality
 - [ ] Multi-account support
+- [ ] End-to-end encryption for stored messages
 
 ## Contributing
 
