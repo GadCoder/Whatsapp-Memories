@@ -1,10 +1,16 @@
 import { getPool } from '../database/connection';
-import { WhatsAppMessage } from '../types/message.types';
+import { WhatsAppMessage, DecryptedMessage } from '../types/message.types';
 import { config } from '../config/config';
+import { EncryptionService } from './EncryptionService';
 import pgvector from 'pgvector/pg';
 
 export class StorageService {
   private initialized = false;
+  private encryptionService: EncryptionService;
+
+  constructor() {
+    this.encryptionService = new EncryptionService();
+  }
 
   async initialize(): Promise<void> {
     if (this.initialized) return;
@@ -24,6 +30,7 @@ export class StorageService {
   /**
    * Save a message with its embedding to the database
    * Uses upsert to handle duplicate messages gracefully
+   * Encrypts sensitive fields (content, PII) while keeping metadata queryable
    */
   async saveMessage(
     message: WhatsAppMessage, 
@@ -78,35 +85,36 @@ export class StorageService {
     // Format embedding for pgvector
     const embeddingValue = embedding ? pgvector.toSql(embedding) : null;
 
+    // Encrypt sensitive fields, keep metadata queryable
     const values = [
-      message.messageId,
-      message.chatId,
-      message.from,
-      message.author || null,
-      message.text,
-      message.senderName || null,
-      message.senderPushname || null,
-      message.senderNumber || null,
-      message.messageType,
-      timestamp,
-      message.isGroup,
-      message.groupName || null,
-      message.participantCount || null,
-      message.fromMe,
-      message.isForwarded,
-      message.isBroadcast,
-      message.hasQuotedMsg,
-      message.quotedMsgId || null,
-      message.quotedMsgBody || null,
-      message.mentionedIds || null,
-      message.hasMedia,
-      message.mediaType || null,
-      message.mediaUrl || null,
-      message.caption || null,
-      message.mimeType || null,
-      message.fileSize || null,
-      embeddingValue,
-      embeddingProvider,
+      message.messageId,                                               // $1
+      message.chatId,                                                  // $2 - PLAIN (queryable)
+      message.from,                                                    // $3 - PLAIN (queryable)
+      this.encryptionService.encrypt(message.author),                  // $4 - ENCRYPTED (raw ID)
+      this.encryptionService.encrypt(message.text),                    // $5 - ENCRYPTED (content)
+      message.senderName || null,                                      // $6 - PLAIN (queryable)
+      message.senderPushname || null,                                  // $7 - PLAIN (queryable)
+      this.encryptionService.encrypt(message.senderNumber),            // $8 - ENCRYPTED (PII)
+      message.messageType,                                             // $9 - PLAIN
+      timestamp,                                                       // $10 - PLAIN (queryable)
+      message.isGroup,                                                 // $11 - PLAIN
+      message.groupName || null,                                       // $12 - PLAIN (queryable)
+      message.participantCount || null,                                // $13 - PLAIN
+      message.fromMe,                                                  // $14 - PLAIN
+      message.isForwarded,                                             // $15 - PLAIN
+      message.isBroadcast,                                             // $16 - PLAIN
+      message.hasQuotedMsg,                                            // $17 - PLAIN
+      message.quotedMsgId || null,                                     // $18 - PLAIN
+      this.encryptionService.encrypt(message.quotedMsgBody),           // $19 - ENCRYPTED (content)
+      message.mentionedIds || null,                                    // $20 - PLAIN
+      message.hasMedia,                                                // $21 - PLAIN
+      message.mediaType || null,                                       // $22 - PLAIN
+      this.encryptionService.encrypt(message.mediaUrl),                // $23 - ENCRYPTED (URL)
+      this.encryptionService.encrypt(message.caption),                 // $24 - ENCRYPTED (content)
+      message.mimeType || null,                                        // $25 - PLAIN
+      message.fileSize || null,                                        // $26 - PLAIN
+      embeddingValue,                                                  // $27 - PLAIN (searchable)
+      embeddingProvider,                                               // $28 - PLAIN
     ];
 
     try {
@@ -114,7 +122,7 @@ export class StorageService {
       
       if (config.debug) {
         if (result.rowCount === 1) {
-          console.log(`[Storage] Saved message: ${message.messageId}`);
+          console.log(`[Storage] Saved encrypted message: ${message.messageId}`);
         } else {
           console.log(`[Storage] Message already exists: ${message.messageId}`);
         }
@@ -160,5 +168,90 @@ export class StorageService {
       stats.set(row.embedding_provider, parseInt(row.count, 10));
     }
     return stats;
+  }
+
+  /**
+   * Get a message by ID and decrypt sensitive fields
+   */
+  async getMessageById(messageId: string): Promise<DecryptedMessage | null> {
+    const pool = getPool();
+    const result = await pool.query(
+      'SELECT * FROM messages WHERE message_id = $1',
+      [messageId]
+    );
+    
+    if (result.rows.length === 0) return null;
+    
+    return this.decryptMessageRow(result.rows[0]);
+  }
+
+  /**
+   * Search messages by sender name, date range, and semantic similarity
+   * Perfect for queries like: "Luis talked about fútbol last month"
+   */
+  async searchBySenderAndContent(
+    senderName: string,
+    queryEmbedding: number[],
+    since: Date,
+    limit: number = 10
+  ): Promise<DecryptedMessage[]> {
+    const pool = getPool();
+    
+    const result = await pool.query(`
+      SELECT *, embedding <-> $1 as distance
+      FROM messages
+      WHERE sender_name = $2
+        AND timestamp >= $3
+        AND embedding IS NOT NULL
+      ORDER BY embedding <-> $1
+      LIMIT $4
+    `, [
+      pgvector.toSql(queryEmbedding),
+      senderName,      // Plaintext filter (fast, indexed)
+      since,           // Plaintext filter (fast, indexed)
+      limit
+    ]);
+    
+    // Decrypt sensitive fields for display
+    return result.rows.map(row => this.decryptMessageRow(row));
+  }
+
+  /**
+   * Search by embedding only (semantic search)
+   * Returns decrypted results
+   */
+  async searchByEmbedding(
+    queryEmbedding: number[],
+    limit: number = 10
+  ): Promise<DecryptedMessage[]> {
+    const pool = getPool();
+    
+    const result = await pool.query(`
+      SELECT *, embedding <-> $1 as distance
+      FROM messages
+      WHERE embedding IS NOT NULL
+      ORDER BY embedding <-> $1
+      LIMIT $2
+    `, [pgvector.toSql(queryEmbedding), limit]);
+    
+    return result.rows.map(row => this.decryptMessageRow(row));
+  }
+
+  /**
+   * Decrypt sensitive fields in a database row
+   * Plaintext fields (sender_name, timestamp, etc.) remain unchanged
+   */
+  private decryptMessageRow(row: any): DecryptedMessage {
+    return {
+      ...row,
+      // Decrypt sensitive fields
+      author: this.encryptionService.decrypt(row.author),
+      text: this.encryptionService.decrypt(row.text),
+      sender_number: this.encryptionService.decrypt(row.sender_number),
+      quoted_msg_body: this.encryptionService.decrypt(row.quoted_msg_body),
+      media_url: this.encryptionService.decrypt(row.media_url),
+      caption: this.encryptionService.decrypt(row.caption),
+      // sender_name, timestamp, group_name, etc. remain as-is (plaintext)
+    };
   }
 }
