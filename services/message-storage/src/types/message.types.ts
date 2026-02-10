@@ -44,6 +44,7 @@ export interface WhatsAppMessage {
 
   // Message status
   fromMe: boolean;
+  recipient?: string; // The recipient (when fromMe=true, this is who you sent to)
   ack?: number;
 
   // Media fields

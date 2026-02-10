@@ -25,6 +25,7 @@ CREATE TABLE IF NOT EXISTS messages (
     
     -- Message status
     from_me BOOLEAN DEFAULT FALSE,
+    recipient TEXT,  -- Recipient for outbound messages (when from_me=true)
     is_forwarded BOOLEAN DEFAULT FALSE,
     is_broadcast BOOLEAN DEFAULT FALSE,
     
@@ -79,6 +80,14 @@ BEGIN
     -- Self-healing: Make text column nullable (for encryption with media messages)
     -- This allows null text for media-only messages where encryption returns null
     ALTER TABLE messages ALTER COLUMN text DROP NOT NULL;
+    
+    -- Self-healing: Add recipient column for outbound messages
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns 
+        WHERE table_name = 'messages' AND column_name = 'recipient' AND table_schema = 'public'
+    ) THEN
+        ALTER TABLE messages ADD COLUMN recipient TEXT;
+    END IF;
 END $$;
 
 -- Indexes for efficient querying

@@ -55,6 +55,7 @@ export class StorageService {
         group_name,
         participant_count,
         from_me,
+        recipient,
         is_forwarded,
         is_broadcast,
         has_quoted_msg,
@@ -72,7 +73,7 @@ export class StorageService {
       ) VALUES (
         $1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
         $11, $12, $13, $14, $15, $16, $17, $18, $19, $20,
-        $21, $22, $23, $24, $25, $26, $27, $28
+        $21, $22, $23, $24, $25, $26, $27, $28, $29
       )
       ON CONFLICT (message_id) DO NOTHING
     `;
@@ -101,20 +102,21 @@ export class StorageService {
       message.groupName || null,                                       // $12 - PLAIN (queryable)
       message.participantCount || null,                                // $13 - PLAIN
       message.fromMe,                                                  // $14 - PLAIN
-      message.isForwarded,                                             // $15 - PLAIN
-      message.isBroadcast,                                             // $16 - PLAIN
-      message.hasQuotedMsg,                                            // $17 - PLAIN
-      message.quotedMsgId || null,                                     // $18 - PLAIN
-      this.encryptionService.encrypt(message.quotedMsgBody),           // $19 - ENCRYPTED (content)
-      this.encryptionService.encryptArray(message.mentionedIds),        // $20 - ENCRYPTED (PII)
-      message.hasMedia,                                                // $21 - PLAIN
-      message.mediaType || null,                                       // $22 - PLAIN
-      this.encryptionService.encrypt(message.mediaUrl),                // $23 - ENCRYPTED (URL)
-      this.encryptionService.encrypt(message.caption),                 // $24 - ENCRYPTED (content)
-      message.mimeType || null,                                        // $25 - PLAIN
-      message.fileSize || null,                                        // $26 - PLAIN
-      embeddingValue,                                                  // $27 - PLAIN (searchable)
-      embeddingProvider,                                               // $28 - PLAIN
+      message.recipient || null,                                       // $15 - PLAIN (recipient for outbound)
+      message.isForwarded,                                             // $16 - PLAIN
+      message.isBroadcast,                                             // $17 - PLAIN
+      message.hasQuotedMsg,                                            // $18 - PLAIN
+      message.quotedMsgId || null,                                     // $19 - PLAIN
+      this.encryptionService.encrypt(message.quotedMsgBody),           // $20 - ENCRYPTED (content)
+      this.encryptionService.encryptArray(message.mentionedIds),       // $21 - ENCRYPTED (PII)
+      message.hasMedia,                                                // $22 - PLAIN
+      message.mediaType || null,                                       // $23 - PLAIN
+      this.encryptionService.encrypt(message.mediaUrl),                // $24 - ENCRYPTED (URL)
+      this.encryptionService.encrypt(message.caption),                 // $25 - ENCRYPTED (content)
+      message.mimeType || null,                                        // $26 - PLAIN
+      message.fileSize || null,                                        // $27 - PLAIN
+      embeddingValue,                                                  // $28 - PLAIN (searchable)
+      embeddingProvider,                                               // $29 - PLAIN
     ];
 
     try {
