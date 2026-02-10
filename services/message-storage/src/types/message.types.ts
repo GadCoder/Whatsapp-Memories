@@ -91,7 +91,7 @@ export interface EncryptedMessage {
   has_quoted_msg: boolean;            // PLAIN
   quoted_msg_id: string | null;       // PLAIN
   quoted_msg_body: string | null;     // ENCRYPTED - quoted content
-  mentioned_ids: string[] | null;     // PLAIN
+  mentioned_ids: string | null;       // ENCRYPTED - JSON array of IDs (stored as encrypted string)
   has_media: boolean;                 // PLAIN
   media_type: string | null;          // PLAIN
   media_url: string | null;           // ENCRYPTED - URL
@@ -105,9 +105,9 @@ export interface EncryptedMessage {
 
 /**
  * Decrypted message for application use
- * All encrypted fields are now plaintext
+ * Overrides encrypted fields with their decrypted types
  */
-export interface DecryptedMessage extends EncryptedMessage {
-  // Same fields, but encrypted ones are now decrypted
-  // This is handled by StorageService.decryptMessageRow()
+export interface DecryptedMessage extends Omit<EncryptedMessage, 'mentioned_ids'> {
+  // Override mentioned_ids to be the decrypted array type
+  mentioned_ids: string[] | null;
 }

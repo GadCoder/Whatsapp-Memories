@@ -1,4 +1,16 @@
 import crypto from 'crypto';
+import { config } from '../config/config';
+
+/**
+ * Custom error for decryption failures
+ * Allows callers to distinguish decryption errors from other failures
+ */
+export class DecryptionError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'DecryptionError';
+  }
+}
 
 /**
  * AES-256-GCM encryption service for sensitive message data
@@ -8,20 +20,37 @@ import crypto from 'crypto';
  * - PLAIN: sender_name, timestamp, group_name, embeddings (queryable metadata)
  * 
  * Format: iv:authTag:ciphertext (all hex, colon-separated)
+ * 
+ * When encryption is disabled (no ENCRYPTION_KEY), operates in pass-through mode.
  */
 export class EncryptionService {
-  private algorithm = 'aes-256-gcm';
-  private key: Buffer;
+  private readonly algorithm = 'aes-256-gcm' as const;
+  private key: Buffer | null = null;
+  private enabled: boolean;
 
   constructor() {
-    const keyHex = process.env.ENCRYPTION_KEY;
-    if (!keyHex || keyHex.length !== 64) {
-      throw new Error(
-        'ENCRYPTION_KEY must be set and be 64 hex characters (256 bits). ' +
-        'Generate with: openssl rand -hex 32'
-      );
+    this.enabled = config.encryption.enabled;
+    
+    if (this.enabled) {
+      const keyHex = config.encryption.key;
+      if (!keyHex || keyHex.length !== 64) {
+        throw new Error(
+          'ENCRYPTION_KEY must be set and be 64 hex characters (256 bits). ' +
+          'Generate with: openssl rand -hex 32'
+        );
+      }
+      this.key = Buffer.from(keyHex, 'hex');
+      console.log('[Encryption] AES-256-GCM encryption enabled');
+    } else {
+      console.log('[Encryption] Encryption disabled - data will be stored in plaintext');
     }
-    this.key = Buffer.from(keyHex, 'hex');
+  }
+
+  /**
+   * Check if encryption is enabled
+   */
+  isEnabled(): boolean {
+    return this.enabled;
   }
 
   /**
@@ -31,9 +60,16 @@ export class EncryptionService {
    * IV: 16 bytes (128 bits) for AES-256-GCM - REQUIRED for GCM security
    * Auth Tag: 16 bytes (128 bits) - provides authentication
    * Minimum output length: 67 chars (32:32:1 for single char plaintext)
+   * 
+   * If encryption is disabled, returns plaintext unchanged.
    */
   encrypt(plaintext: string | null | undefined): string | null {
     if (!plaintext) return null;
+    
+    // Pass-through mode when encryption is disabled
+    if (!this.enabled || !this.key) {
+      return plaintext;
+    }
     
     const iv = crypto.randomBytes(16);
     const cipher = crypto.createCipheriv(this.algorithm, this.key, iv);
@@ -49,7 +85,9 @@ export class EncryptionService {
   /**
    * Decrypt from hex format
    * Backward compatible: returns plaintext if not encrypted (no colons)
-   * Returns null on failure (doesn't expose error details)
+   * Throws DecryptionError on failure to prevent silent data loss.
+   * 
+   * If encryption is disabled, returns ciphertext unchanged.
    */
   decrypt(ciphertext: string | null | undefined): string | null {
     if (!ciphertext) return null;
@@ -59,10 +97,18 @@ export class EncryptionService {
       return ciphertext;
     }
 
+    // If encryption is disabled but we encounter encrypted data, 
+    // we can't decrypt it - throw an error
+    if (!this.enabled || !this.key) {
+      throw new DecryptionError(
+        'Cannot decrypt data: encryption is disabled but encrypted data was found. ' +
+        'Set ENCRYPTION_KEY to decrypt existing encrypted data.'
+      );
+    }
+
     const parts = ciphertext.split(':');
     if (parts.length !== 3) {
-      console.warn('Invalid ciphertext format');
-      return null;
+      throw new DecryptionError('Invalid ciphertext format: expected iv:authTag:ciphertext');
     }
 
     const [ivHex, authTagHex, encrypted] = parts;
@@ -70,8 +116,15 @@ export class EncryptionService {
     // Validate hex format
     const hexRegex = /^[0-9a-fA-F]+$/;
     if (!hexRegex.test(ivHex) || !hexRegex.test(authTagHex) || !hexRegex.test(encrypted)) {
-      console.warn('Invalid hex in ciphertext');
-      return null;
+      throw new DecryptionError('Invalid hex encoding in ciphertext');
+    }
+
+    // Validate IV and authTag lengths (must be exactly 32 hex chars = 16 bytes)
+    if (ivHex.length !== 32) {
+      throw new DecryptionError(`Invalid IV length: expected 32 hex chars, got ${ivHex.length}`);
+    }
+    if (authTagHex.length !== 32) {
+      throw new DecryptionError(`Invalid authTag length: expected 32 hex chars, got ${authTagHex.length}`);
     }
 
     try {
@@ -87,14 +140,13 @@ export class EncryptionService {
 
       return decrypted;
     } catch (error) {
-      console.error('Decryption failed');
-      return null;
+      throw new DecryptionError('Decryption failed: authentication failed or corrupted data');
     }
   }
 
   /**
    * Encrypt an array of strings (e.g., mentioned_ids)
-   * Returns JSON-serialized encrypted array
+   * Returns JSON-serialized encrypted string, or JSON string if encryption disabled
    */
   encryptArray(arr: string[] | null | undefined): string | null {
     if (!arr || arr.length === 0) return null;
@@ -104,6 +156,7 @@ export class EncryptionService {
 
   /**
    * Decrypt an array of strings
+   * Throws DecryptionError on failure
    */
   decryptArray(encrypted: string | null | undefined): string[] | null {
     if (!encrypted) return null;
@@ -112,32 +165,7 @@ export class EncryptionService {
     try {
       return JSON.parse(decrypted);
     } catch {
-      return null;
+      throw new DecryptionError('Failed to parse decrypted array as JSON');
     }
-  }
-
-  /**
-   * Check if text appears to be encrypted
-   * Validates format: iv:authTag:ciphertext (all hex)
-   * Minimum length: 67 chars (32:32:1)
-   */
-  isEncrypted(text: string | null): boolean {
-    if (!text) return false;
-
-    const parts = text.split(':');
-    if (parts.length !== 3) return false;
-
-    const [ivHex, authTagHex, cipherHex] = parts;
-    const hexRegex = /^[0-9a-fA-F]+$/;
-
-    // IV and auth tag must be exactly 32 hex chars (16 bytes)
-    if (ivHex.length !== 32 || authTagHex.length !== 32) return false;
-    if (!hexRegex.test(ivHex) || !hexRegex.test(authTagHex)) return false;
-
-    // Ciphertext must be valid hex, minimum 2 chars (1 byte)
-    if (cipherHex.length < 2 || cipherHex.length % 2 !== 0) return false;
-    if (!hexRegex.test(cipherHex)) return false;
-
-    return true;
   }
 }

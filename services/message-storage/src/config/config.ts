@@ -24,6 +24,10 @@ export interface Config {
       model: string;
     };
   };
+  encryption: {
+    enabled: boolean;
+    key: string | null;
+  };
   debug: boolean;
 }
 
@@ -62,6 +66,10 @@ export const config: Config = {
       apiKey: process.env.GEMINI_API_KEY || '',
       model: getEnvOrDefault('GEMINI_EMBEDDING_MODEL', 'text-embedding-004'),
     },
+  },
+  encryption: {
+    enabled: !!process.env.ENCRYPTION_KEY && process.env.ENCRYPTION_KEY.length === 64,
+    key: process.env.ENCRYPTION_KEY || null,
   },
   debug: getEnvOrDefault('DEBUG', 'false').toLowerCase() === 'true',
 };
