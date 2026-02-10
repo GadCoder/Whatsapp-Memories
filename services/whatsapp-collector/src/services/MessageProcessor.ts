@@ -102,6 +102,7 @@ export class MessageProcessor {
       hasMedia: message.hasMedia,
       messageType,
       fromMe: message.fromMe,
+      recipient: message.fromMe ? message.to : undefined, // Capture recipient for outbound messages
       isForwarded: message.isForwarded,
       hasQuotedMsg: message.hasQuotedMsg,
       quotedMsgId,

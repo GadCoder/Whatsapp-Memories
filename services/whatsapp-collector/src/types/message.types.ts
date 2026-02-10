@@ -31,6 +31,7 @@ export interface WhatsAppMessage {
 
   // Message status
   fromMe: boolean; // Did we send this message?
+  recipient?: string; // The recipient (when fromMe=true, this is who you sent to)
   ack?: number; // Acknowledgment status (0=error, 1=pending, 2=server, 3=delivered, 4=read)
 
   // Future media fields (for when we implement media)
