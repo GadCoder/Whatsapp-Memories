@@ -48,6 +48,7 @@ export class StorageService {
         group_name,
         participant_count,
         from_me,
+        recipient,
         is_forwarded,
         is_broadcast,
         has_quoted_msg,
@@ -65,7 +66,7 @@ export class StorageService {
       ) VALUES (
         $1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
         $11, $12, $13, $14, $15, $16, $17, $18, $19, $20,
-        $21, $22, $23, $24, $25, $26, $27, $28
+        $21, $22, $23, $24, $25, $26, $27, $28, $29
       )
       ON CONFLICT (message_id) DO NOTHING
     `;
@@ -93,6 +94,7 @@ export class StorageService {
       message.groupName || null,
       message.participantCount || null,
       message.fromMe,
+      message.recipient || null,  // Recipient for outbound messages
       message.isForwarded,
       message.isBroadcast,
       message.hasQuotedMsg,
