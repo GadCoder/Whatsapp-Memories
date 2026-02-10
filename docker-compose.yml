@@ -109,6 +109,11 @@ services:
       - GEMINI_API_KEY=${GEMINI_API_KEY:-}
       - GEMINI_EMBEDDING_MODEL=${GEMINI_EMBEDDING_MODEL:-text-embedding-004}
       
+      # Encryption Configuration
+      # Generate key with: openssl rand -hex 32
+      # CRITICAL: Keep this key secure - without it, encrypted data is unrecoverable
+      - ENCRYPTION_KEY=${ENCRYPTION_KEY}
+      
       # Debug
       - DEBUG=${DEBUG:-false}
     networks:
