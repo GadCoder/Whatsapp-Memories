@@ -8,7 +8,7 @@ CREATE TABLE IF NOT EXISTS messages (
     chat_id TEXT NOT NULL,
     sender TEXT NOT NULL,
     author TEXT,
-    text TEXT NOT NULL,
+    text TEXT,  -- Nullable: media messages may not have text
     
     -- Contact information (self-healing: added via ALTER TABLE for existing deployments)
     sender_name TEXT,
@@ -75,6 +75,10 @@ BEGIN
     ) THEN
         ALTER TABLE messages ADD COLUMN sender_number TEXT;
     END IF;
+    
+    -- Self-healing: Make text column nullable (for encryption with media messages)
+    -- This allows null text for media-only messages where encryption returns null
+    ALTER TABLE messages ALTER COLUMN text DROP NOT NULL;
 END $$;
 
 -- Indexes for efficient querying
