@@ -5,6 +5,7 @@ import { FilterService } from './services/FilterService';
 import { MessageProcessor } from './services/MessageProcessor';
 import { config } from './config/config';
 import { logger } from './utils/logger';
+import { MessageDeduplicator } from './utils/deduplication';
 
 /**
  * Main WhatsApp Collector Service
@@ -21,11 +22,20 @@ async function startCollector() {
     groupsFilter: config.filter.groupsFilter,
     debug: config.debug,
   });
+  if (config.filterValidation.invalidContacts.length > 0) {
+    logger.warn('FILTER_CONTACTS has invalid identifiers', {
+      invalidContacts: config.filterValidation.invalidContacts,
+      strictValidation: config.filterValidation.strict,
+      expectedSuffixes: ['@c.us', '@g.us', '@broadcast'],
+    });
+  }
 
   // Initialize services
   const publisher = new PublisherService();
   const filterService = new FilterService(config.filter);
   const messageProcessor = new MessageProcessor();
+  const deduplicator = new MessageDeduplicator(config.dedupe.windowMs);
+  let isShuttingDown = false;
 
   // Connect to Redis
   try {
@@ -40,7 +50,16 @@ async function startCollector() {
   
   // Helper function to handle messages
   const handleMessage = async (message: Message, eventType: string) => {
-    logger.info(`${eventType} event fired!`, { messageId: message.id._serialized });
+    if (isShuttingDown) {
+      return;
+    }
+    const messageId = message.id._serialized;
+    logger.info(`${eventType} event fired!`, { messageId });
+
+    if (!deduplicator.shouldProcess(messageId)) {
+      logger.debug('Skipping duplicate message event', { messageId, eventType });
+      return;
+    }
     
     try {
       const direction = message.fromMe ? 'outgoing' : 'incoming';
@@ -138,7 +157,12 @@ async function startCollector() {
   logger.info('========================================');
 
   // Graceful shutdown handlers
-  const shutdown = async (signal: string) => {
+  const shutdown = async (signal: string, exitCode: number) => {
+    if (isShuttingDown) {
+      logger.warn('Shutdown already in progress; ignoring duplicate signal', { signal });
+      return;
+    }
+    isShuttingDown = true;
     logger.info(`Received ${signal}, shutting down gracefully...`);
     
     try {
@@ -149,24 +173,25 @@ async function startCollector() {
       await whatsAppClient.client.destroy();
       
       logger.info('Shutdown complete');
-      process.exit(0);
+      process.exit(exitCode);
     } catch (error) {
       logger.error('Error during shutdown', { error });
       process.exit(1);
     }
   };
 
-  process.on('SIGINT', () => shutdown('SIGINT'));
-  process.on('SIGTERM', () => shutdown('SIGTERM'));
+  process.on('SIGINT', () => void shutdown('SIGINT', 0));
+  process.on('SIGTERM', () => void shutdown('SIGTERM', 0));
 
   // Handle uncaught errors
   process.on('uncaughtException', (error) => {
     logger.error('Uncaught exception', { error: error.message, stack: error.stack });
-    shutdown('uncaughtException');
+    void shutdown('uncaughtException', 1);
   });
 
   process.on('unhandledRejection', (reason, promise) => {
     logger.error('Unhandled rejection', { reason, promise });
+    void shutdown('unhandledRejection', 1);
   });
 }
 

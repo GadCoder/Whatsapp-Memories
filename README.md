@@ -11,7 +11,7 @@ This project provides infrastructure for:
 - **Message Collection**: Capture all incoming WhatsApp messages
 - **Rich Metadata**: Extract replies, forwards, mentions, group info, and more
 - **Flexible Filtering**: Choose which messages to save based on contact, group, or type
-- **Reliable Delivery**: Retry logic and local queuing ensure no messages are lost
+- **Reliable Delivery**: Retry logic, local queueing, and dead-letter persistence reduce message loss risk
 - **Type-Based Routing**: Different Redis channels for different message types
 - **Extensible Architecture**: Add new services to process, store, or analyze messages
 
@@ -179,6 +179,9 @@ FILTER_CONTACTS=1234567890@c.us,0987654321@c.us
 FILTER_MODE=blocklist
 FILTER_CONTACTS=spammer@c.us
 
+# Validate FILTER_CONTACTS IDs strictly
+FILTER_STRICT_VALIDATION=false
+
 # Only groups
 FILTER_GROUPS=only
 
@@ -200,6 +203,10 @@ RETRY_BACKOFF_MULTIPLIER=2
 # Queue messages locally if Redis is down
 QUEUE_MAX_SIZE=1000
 QUEUE_FLUSH_INTERVAL=60000
+QUEUE_DEAD_LETTER_PATH=/usr/src/app/data/publisher-dead-letter.ndjson
+
+# Suppress duplicate processing across overlapping WhatsApp events
+MESSAGE_DEDUPE_WINDOW_MS=600000
 ```
 
 ### Debug Mode
@@ -207,6 +214,9 @@ QUEUE_FLUSH_INTERVAL=60000
 ```bash
 # Enable detailed logging
 DEBUG=true
+
+# Embedding startup mode for message-storage
+EMBEDDINGS_REQUIRED=false
 ```
 
 See [.env.example](.env.example) for all options with descriptions.
@@ -599,7 +609,7 @@ The system supports AES-256-GCM encryption for sensitive message data:
 
 - [ ] Media message support (images, videos, audio)
 - [ ] S3 integration for media storage
-- [ ] Dead letter queue for failed messages
+- [x] Dead letter queue for failed messages
 - [ ] Health check HTTP endpoint
 - [ ] Prometheus metrics
 - [ ] Search API (semantic + filter by sender/date)

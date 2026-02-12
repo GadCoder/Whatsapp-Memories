@@ -3,6 +3,7 @@ import { WhatsAppMessage, MessageType } from '../types/message.types';
 import { config } from '../config/config';
 import { logger } from '../utils/logger';
 import { retryWithBackoff } from '../utils/retry';
+import { DeadLetterReason, writeDeadLetterRecord } from './deadLetter';
 
 /**
  * Service for publishing messages to Redis with retry and queue support
@@ -46,6 +47,7 @@ export class PublisherService {
 
       // Start queue flush interval
       this.startQueueFlush();
+      await this.logDeadLetterRecoveryHint();
     } catch (error) {
       logger.error('Failed to connect to Redis', { error });
       throw error;
@@ -91,8 +93,7 @@ export class PublisherService {
           messageId: message.messageId,
           queueSize: this.failedQueue.length,
         });
-        // TODO: Write to dead letter file for manual recovery
-        // await this.writeToDeadLetterQueue({ channel, payload });
+        await this.writeToDeadLetterQueue(channel, payload, 'queue-full');
       }
     }
   }
@@ -150,6 +151,8 @@ export class PublisherService {
         });
         if (this.failedQueue.length < config.queue.maxSize) {
           this.failedQueue.push(item);
+        } else {
+          await this.writeToDeadLetterQueue(item.channel, item.payload, 'flush-requeue-full');
         }
       }
     }
@@ -179,7 +182,11 @@ export class PublisherService {
 
       if (this.failedQueue.length > 0) {
         logger.warn(`${this.failedQueue.length} messages could not be flushed and will be lost`);
-        // TODO: Write remaining messages to dead letter file
+        const remaining = [...this.failedQueue];
+        this.failedQueue = [];
+        for (const item of remaining) {
+          await this.writeToDeadLetterQueue(item.channel, item.payload, 'shutdown-unflushed');
+        }
       }
     }
 
@@ -188,6 +195,41 @@ export class PublisherService {
       logger.info('Publisher disconnected from Redis');
     } catch (error) {
       logger.error('Error disconnecting from Redis', { error });
+    }
+  }
+
+  private async logDeadLetterRecoveryHint(): Promise<void> {
+    logger.info('Dead-letter path configured for failed publish records', {
+      deadLetterPath: config.queue.deadLetterPath,
+    });
+  }
+
+  private async writeToDeadLetterQueue(
+    channel: string,
+    payload: string,
+    reason: DeadLetterReason
+  ): Promise<void> {
+    try {
+      const deadLetterPath = config.queue.deadLetterPath;
+      await writeDeadLetterRecord(deadLetterPath, channel, payload, reason);
+      let messageId: string | undefined;
+      try {
+        messageId = (JSON.parse(payload) as { messageId?: string }).messageId;
+      } catch {
+        messageId = undefined;
+      }
+      logger.warn('Message persisted to dead-letter storage', {
+        reason,
+        channel,
+        messageId,
+        deadLetterPath,
+      });
+    } catch (error) {
+      logger.error('Failed to persist message to dead-letter storage', {
+        reason,
+        channel,
+        error: (error as Error).message,
+      });
     }
   }
 }
