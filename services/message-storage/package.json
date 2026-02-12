@@ -7,7 +7,8 @@
     "build": "tsc",
     "start": "node dist/index.js",
     "dev": "ts-node src/index.ts",
-    "test-embeddings": "ts-node scripts/test-embeddings.ts"
+    "test-embeddings": "ts-node scripts/test-embeddings.ts",
+    "test": "npm run build && node --test dist/tests/*.test.js"
   },
   "keywords": ["whatsapp", "storage", "embeddings", "rag", "pgvector"],
   "author": "",
