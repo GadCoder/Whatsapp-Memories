@@ -120,6 +120,54 @@ services:
       - whatsapp-memories-network
     restart: unless-stopped
 
+  embedding-api:
+    build:
+      context: ./services/embedding-api
+      dockerfile: Dockerfile
+    container_name: embedding-api
+    # INTERNAL ACCESS ONLY - No port exposed to host
+    # OpenClaw accesses via Docker network
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      # Server
+      - PORT=3002
+      
+      # PostgreSQL Configuration
+      - POSTGRES_HOST=postgres
+      - POSTGRES_PORT=5432
+      - POSTGRES_DB=${POSTGRES_DB:-memories}
+      - POSTGRES_USER=${POSTGRES_USER:-memories}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-memories}
+      - PG_POOL_SIZE=10
+      
+      # OpenAI Configuration
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - OPENAI_EMBEDDING_MODEL=${OPENAI_EMBEDDING_MODEL:-text-embedding-3-small}
+      
+      # Encryption Configuration
+      # Must match the key used by message-storage
+      - ENCRYPTION_KEY=${ENCRYPTION_KEY}
+      
+      # Auth - REQUIRED: No default, service fails to start if not set
+      - API_TOKEN=${API_TOKEN}
+      
+      # Rate Limiting
+      - RATE_LIMIT_REQUESTS_PER_MINUTE=60
+      
+      # Logging
+      - LOG_LEVEL=info
+    networks:
+      - whatsapp-memories-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:3002/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
 volumes:
   redis-data:
   postgres-data:
