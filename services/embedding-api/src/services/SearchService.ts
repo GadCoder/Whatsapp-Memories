@@ -41,7 +41,7 @@ export class SearchService {
           AND ($3::date IS NULL OR timestamp < ($3::date + INTERVAL '1 day'))
           AND ($4::uuid IS NULL OR chat_id = $4)
           AND ($5::boolean IS NULL OR is_group = $5)
-        ORDER BY embedding <=> $1
+        ORDER BY distance
         LIMIT LEAST($6, 100)
       `;
 

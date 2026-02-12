@@ -2,7 +2,7 @@ import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { EmbeddingService } from '../services/EmbeddingService';
 import { SearchService } from '../services/SearchService';
 import { searchSchema } from '../schemas/search.schema';
-import { SearchRequest, SearchResponse, ErrorResponse } from '../types/search.types';
+import { SearchRequest, SearchResponse } from '../types/search.types';
 import { logger } from '../utils/logger';
 import { AppError, ErrorCodes } from '../utils/errors';
 

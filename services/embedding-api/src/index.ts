@@ -1,31 +1,57 @@
 import fastify from 'fastify';
 import rateLimit from '@fastify/rate-limit';
+import crypto, { randomUUID } from 'crypto';
 import { config } from './config/config';
 import { logger } from './utils/logger';
 import { errorHandler } from './middleware/errorHandler';
 import { authMiddleware } from './middleware/auth';
-import { requestIdMiddleware } from './middleware/requestId';
 import { healthRoutes } from './routes/health';
 import { searchRoutes } from './routes/search';
 import { statsRoutes } from './routes/stats';
 
+const MAX_REQUEST_ID_LENGTH = 128;
+
+function getRateLimitKey(request: { headers: Record<string, unknown>; ip: string }): string {
+  const authHeader = request.headers['authorization'];
+  if (typeof authHeader === 'string' && authHeader.startsWith('Bearer ')) {
+    const token = authHeader.slice(7).trim();
+    if (token.length > 0) {
+      const tokenHash = crypto.createHash('sha256').update(token).digest('hex');
+      return `token:${tokenHash}`;
+    }
+  }
+
+  return `ip:${request.ip}`;
+}
+
 async function start() {
   const app = fastify({
     logger: true,
-    genReqId: () => Math.random().toString(36).substring(2, 15)
+    genReqId: (req) => {
+      const headerId = req.headers['x-request-id'];
+      if (typeof headerId === 'string') {
+        const trimmed = headerId.trim();
+        if (trimmed.length > 0 && trimmed.length <= MAX_REQUEST_ID_LENGTH) {
+          return trimmed;
+        }
+      }
+      return randomUUID();
+    }
   });
 
   // Error handler
   app.setErrorHandler(errorHandler);
 
-  // Request ID middleware
-  app.addHook('onRequest', requestIdMiddleware);
+  app.addHook('onSend', async (request, reply, payload) => {
+    reply.header('x-request-id', request.id);
+    return payload;
+  });
 
   // Rate limiting
   await app.register(rateLimit, {
     max: config.rateLimit.maxRequests,
     timeWindow: config.rateLimit.timeWindow,
-    keyGenerator: (request) => request.headers['authorization'] || request.ip,
+    keyGenerator: getRateLimitKey,
     errorResponseBuilder: (req, context) => ({
       status: 'error',
       error: {
