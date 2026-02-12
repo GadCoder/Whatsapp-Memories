@@ -4,13 +4,16 @@ WORKDIR /usr/src/app
 
 # Install dependencies
 COPY package*.json ./
-RUN npm ci --only=production
+RUN npm ci
 
 # Copy source code
 COPY . .
 
 # Build TypeScript
 RUN npm run build
+
+# Keep runtime image lean
+RUN npm prune --omit=dev
 
 # Create non-root user
 RUN addgroup -g 1001 -S nodejs

@@ -3,6 +3,7 @@ import { EncryptionService } from './EncryptionService';
 import { logger } from '../utils/logger';
 import { SearchResult } from '../types/search.types';
 import { AppError, ErrorCodes } from '../utils/errors';
+import pgvector from 'pgvector/pg';
 
 interface SearchFilters {
   start_date?: string;
@@ -36,8 +37,8 @@ export class SearchService {
         FROM messages
         WHERE 
           embedding IS NOT NULL
-          AND ($2::timestamp IS NULL OR timestamp >= $2)
-          AND ($3::timestamp IS NULL OR timestamp <= $3)
+          AND ($2::date IS NULL OR timestamp >= $2::date)
+          AND ($3::date IS NULL OR timestamp < ($3::date + INTERVAL '1 day'))
           AND ($4::uuid IS NULL OR chat_id = $4)
           AND ($5::boolean IS NULL OR is_group = $5)
         ORDER BY embedding <=> $1
@@ -45,7 +46,7 @@ export class SearchService {
       `;
 
       const result = await pool.query(query, [
-        `[${embedding.join(',')}]`,
+        pgvector.toSql(embedding),
         filters?.start_date || null,
         filters?.end_date || null,
         filters?.chat_id || null,

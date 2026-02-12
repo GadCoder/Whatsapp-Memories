@@ -214,6 +214,7 @@ yarn-error.log*
 lerna-debug.log*
 .pnpm-debug.log*
 package-lock.json
+!services/embedding-api/package-lock.json
 
 # TypeScript build output
 dist/
