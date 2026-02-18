@@ -1,57 +1,83 @@
 import { config } from '../../config/config';
 import { IEmbeddingProvider, ProviderStats, EmbeddingResult } from './types';
 import { createEmbeddingProvider } from './providers';
+import { ProviderType } from '../../config/config';
+
+type EmbeddingConfig = typeof config.embedding;
 
 export class EmbeddingService {
-  private primary: IEmbeddingProvider;
+  private primary: IEmbeddingProvider | null = null;
   private fallback?: IEmbeddingProvider;
   private stats: Map<string, ProviderStats>;
+  private unavailableReason: string | null = null;
 
-  constructor() {
-    // Validate primary provider has API key
-    if (config.embedding.provider === 'openai' && !config.embedding.openai.apiKey) {
-      throw new Error('OPENAI_API_KEY is required when using OpenAI provider');
+  constructor(
+    private readonly embeddingConfig: EmbeddingConfig = config.embedding,
+    private readonly debug: boolean = config.debug
+  ) {
+    this.primary = this.tryCreateProvider(this.embeddingConfig.provider, true);
+    if (this.embeddingConfig.fallbackProvider) {
+      this.fallback =
+        this.tryCreateProvider(this.embeddingConfig.fallbackProvider, false) || undefined;
     }
-    if (config.embedding.provider === 'gemini' && !config.embedding.gemini.apiKey) {
-      throw new Error('GEMINI_API_KEY is required when using Gemini provider');
-    }
 
-    // Create primary provider
-    this.primary = createEmbeddingProvider(config.embedding.provider, {
-      provider: config.embedding.provider,
-      openai: config.embedding.openai,
-      gemini: config.embedding.gemini,
-      debug: config.debug,
-    });
-
-    // Create fallback provider if configured
-    if (config.embedding.fallbackProvider) {
-      if (config.embedding.fallbackProvider === 'openai' && !config.embedding.openai.apiKey) {
-        console.warn('[EmbeddingService] Fallback provider OpenAI configured but no API key provided');
-      } else if (config.embedding.fallbackProvider === 'gemini' && !config.embedding.gemini.apiKey) {
-        console.warn('[EmbeddingService] Fallback provider Gemini configured but no API key provided');
-      } else {
-        this.fallback = createEmbeddingProvider(config.embedding.fallbackProvider, {
-          provider: config.embedding.fallbackProvider,
-          openai: config.embedding.openai,
-          gemini: config.embedding.gemini,
-          debug: config.debug,
-        });
-      }
+    if (!this.primary && this.embeddingConfig.required) {
+      throw new Error(
+        this.unavailableReason ||
+          'Embeddings are required but no valid embedding provider could be initialized'
+      );
     }
 
     // Initialize stats
     this.stats = new Map();
-    this.initStats(this.primary.name);
+    if (this.primary) {
+      this.initStats(this.primary.name);
+    }
     if (this.fallback) {
       this.initStats(this.fallback.name);
     }
 
-    console.log(`[EmbeddingService] Primary provider: ${this.primary.name}`);
+    if (this.primary) {
+      console.log(`[EmbeddingService] Primary provider: ${this.primary.name}`);
+      console.log(`[EmbeddingService] Embedding dimensions: ${this.primary.dimensions}`);
+    }
     if (this.fallback) {
       console.log(`[EmbeddingService] Fallback provider: ${this.fallback.name}`);
     }
-    console.log(`[EmbeddingService] Embedding dimensions: ${this.primary.dimensions}`);
+    if (!this.primary) {
+      console.warn(
+        `[EmbeddingService] Embeddings unavailable: ${this.unavailableReason || 'unknown reason'}`
+      );
+    }
+  }
+
+  private tryCreateProvider(
+    provider: ProviderType,
+    isPrimary: boolean
+  ): IEmbeddingProvider | null {
+    if (provider === 'openai' && !this.embeddingConfig.openai.apiKey) {
+      const message = '[EmbeddingService] OpenAI provider configured but OPENAI_API_KEY is missing';
+      if (isPrimary) {
+        this.unavailableReason = message;
+      }
+      console.warn(message);
+      return null;
+    }
+    if (provider === 'gemini' && !this.embeddingConfig.gemini.apiKey) {
+      const message = '[EmbeddingService] Gemini provider configured but GEMINI_API_KEY is missing';
+      if (isPrimary) {
+        this.unavailableReason = message;
+      }
+      console.warn(message);
+      return null;
+    }
+
+    return createEmbeddingProvider(provider, {
+      provider,
+      openai: this.embeddingConfig.openai,
+      gemini: this.embeddingConfig.gemini,
+      debug: this.debug,
+    });
   }
 
   private initStats(provider: string): void {
@@ -127,24 +153,30 @@ export class EmbeddingService {
     if (!text || text.trim().length === 0) {
       throw new Error('Cannot generate embedding for empty text');
     }
+    if (!this.primary) {
+      throw new Error(
+        this.unavailableReason || 'Embedding provider is unavailable in degraded mode'
+      );
+    }
+    const primary = this.primary;
 
     // Try primary provider
     try {
-      this.recordRequest(this.primary.name);
+      this.recordRequest(primary.name);
       const startTime = Date.now();
       
       const embedding = await this.retryWithBackoff(() => 
-        this.primary.generate(text)
+        primary.generate(text)
       );
       
       const latency = Date.now() - startTime;
-      this.recordSuccess(this.primary.name, latency);
+      this.recordSuccess(primary.name, latency);
       
-      return { embedding, provider: this.primary.name };
+      return { embedding, provider: primary.name };
     } catch (primaryError) {
-      this.recordFailure(this.primary.name);
+      this.recordFailure(primary.name);
       console.error(
-        `[EmbeddingService] Primary provider ${this.primary.name} failed:`,
+        `[EmbeddingService] Primary provider ${primary.name} failed:`,
         primaryError
       );
       
@@ -192,27 +224,33 @@ export class EmbeddingService {
     if (validTexts.length === 0) {
       return [];
     }
+    if (!this.primary) {
+      throw new Error(
+        this.unavailableReason || 'Embedding provider is unavailable in degraded mode'
+      );
+    }
+    const primary = this.primary;
 
     // Try primary provider
     try {
-      this.recordRequest(this.primary.name);
+      this.recordRequest(primary.name);
       const startTime = Date.now();
       
       const embeddings = await this.retryWithBackoff(() => 
-        this.primary.generateBatch(validTexts)
+        primary.generateBatch(validTexts)
       );
       
       const latency = Date.now() - startTime;
-      this.recordSuccess(this.primary.name, latency);
+      this.recordSuccess(primary.name, latency);
       
       return embeddings.map(embedding => ({
         embedding,
-        provider: this.primary.name,
+        provider: primary.name,
       }));
     } catch (primaryError) {
-      this.recordFailure(this.primary.name);
+      this.recordFailure(primary.name);
       console.error(
-        `[EmbeddingService] Primary provider ${this.primary.name} batch failed:`,
+        `[EmbeddingService] Primary provider ${primary.name} batch failed:`,
         primaryError
       );
       
@@ -263,6 +301,14 @@ export class EmbeddingService {
    * Get current provider dimensions
    */
   getDimensions(): number {
-    return this.primary.dimensions;
+    return this.primary ? this.primary.dimensions : 0;
+  }
+
+  isAvailable(): boolean {
+    return this.primary !== null;
+  }
+
+  getUnavailableReason(): string | null {
+    return this.unavailableReason;
   }
 }

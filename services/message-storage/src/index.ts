@@ -4,6 +4,7 @@ import { SubscriberService } from './services/SubscriberService';
 import { EmbeddingService } from './services/embeddings/EmbeddingService';
 import { StorageService } from './services/StorageService';
 import { WhatsAppMessage } from './types/message.types';
+import { createTerminator } from './utils/termination';
 
 class MessageStorageService {
   private subscriber: SubscriberService;
@@ -11,6 +12,9 @@ class MessageStorageService {
   private storage: StorageService;
   private messageCount = 0;
   private errorCount = 0;
+  private statsInterval: NodeJS.Timeout | null = null;
+  private isStatsRunning = false;
+  private isShuttingDown = false;
 
   constructor() {
     this.subscriber = new SubscriberService();
@@ -26,6 +30,14 @@ class MessageStorageService {
     console.log(`Primary embedding provider: ${config.embedding.provider}`);
     if (config.embedding.fallbackProvider) {
       console.log(`Fallback embedding provider: ${config.embedding.fallbackProvider}`);
+    }
+    console.log(`Embeddings required: ${config.embedding.required}`);
+    if (!this.embedding.isAvailable()) {
+      console.warn(
+        `[Startup] Embeddings unavailable; continuing in degraded mode: ${
+          this.embedding.getUnavailableReason() || 'unknown reason'
+        }`
+      );
     }
     console.log('');
 
@@ -56,7 +68,7 @@ class MessageStorageService {
     } catch (error) {
       console.error('[Startup] Failed to start service:', error);
       await this.shutdown();
-      process.exit(1);
+      throw error;
     }
   }
 
@@ -96,8 +108,15 @@ class MessageStorageService {
   }
 
   private startStatsReporter(): void {
+    if (this.statsInterval) {
+      return;
+    }
     // Log stats every 5 minutes
-    setInterval(async () => {
+    this.statsInterval = setInterval(async () => {
+      if (this.isStatsRunning || this.isShuttingDown) {
+        return;
+      }
+      this.isStatsRunning = true;
       try {
         const totalMessages = await this.storage.getMessageCount();
         const embeddedMessages = await this.storage.getEmbeddedMessageCount();
@@ -131,14 +150,24 @@ class MessageStorageService {
         console.log('[Stats] -----------------------------------------');
       } catch (error) {
         console.error('[Stats] Failed to get stats:', error);
+      } finally {
+        this.isStatsRunning = false;
       }
     }, 5 * 60 * 1000);
   }
 
   async shutdown(): Promise<void> {
+    if (this.isShuttingDown) {
+      return;
+    }
+    this.isShuttingDown = true;
     console.log('[Shutdown] Shutting down...');
     
     try {
+      if (this.statsInterval) {
+        clearInterval(this.statsInterval);
+        this.statsInterval = null;
+      }
       await this.subscriber.disconnect();
       await closeDatabase();
       console.log('[Shutdown] Cleanup complete');
@@ -150,32 +179,33 @@ class MessageStorageService {
 
 // Main entry point
 const service = new MessageStorageService();
+const terminate = createTerminator({
+  shutdown: () => service.shutdown(),
+  onExit: (exitCode: number) => process.exit(exitCode),
+});
 
 // Handle graceful shutdown
 process.on('SIGINT', async () => {
-  console.log('\n[Signal] Received SIGINT');
-  await service.shutdown();
-  process.exit(0);
+  await terminate('SIGINT', 0);
 });
 
 process.on('SIGTERM', async () => {
-  console.log('\n[Signal] Received SIGTERM');
-  await service.shutdown();
-  process.exit(0);
+  await terminate('SIGTERM', 0);
 });
 
 // Handle uncaught errors
 process.on('uncaughtException', (error) => {
   console.error('[Error] Uncaught exception:', error);
-  process.exit(1);
+  void terminate('uncaughtException', 1);
 });
 
 process.on('unhandledRejection', (reason, promise) => {
   console.error('[Error] Unhandled rejection at:', promise, 'reason:', reason);
+  void terminate('unhandledRejection', 1);
 });
 
 // Start the service
 service.start().catch((error) => {
   console.error('[Fatal] Failed to start service:', error);
-  process.exit(1);
+  void terminate('startup-failure', 1);
 });
