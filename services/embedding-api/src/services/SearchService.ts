@@ -3,7 +3,6 @@ import { EncryptionService } from './EncryptionService';
 import { logger } from '../utils/logger';
 import { SearchResult } from '../types/search.types';
 import { AppError, ErrorCodes } from '../utils/errors';
-import pgvector from 'pgvector/pg';
 
 interface SearchFilters {
   start_date?: string;
@@ -33,7 +32,7 @@ export class SearchService {
       const query = `
         SELECT 
           id, message_id, sender_name, text, timestamp,
-          embedding <=> $1 as distance
+          embedding <=> $1::vector as distance
         FROM messages
         WHERE 
           embedding IS NOT NULL
@@ -46,7 +45,7 @@ export class SearchService {
       `;
 
       const result = await pool.query(query, [
-        pgvector.toSql(embedding),
+        embedding, // Pass array directly, pg will convert
         filters?.start_date || null,
         filters?.end_date || null,
         filters?.chat_id || null,
