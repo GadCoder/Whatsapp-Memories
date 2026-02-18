@@ -15,6 +15,7 @@ export interface Config {
   embedding: {
     provider: ProviderType;
     fallbackProvider?: ProviderType;
+    required: boolean;
     openai: {
       apiKey: string;
       model: string;
@@ -58,6 +59,7 @@ export const config: Config = {
   embedding: {
     provider: (getEnvOrDefault('EMBEDDING_PROVIDER', 'openai') as ProviderType),
     fallbackProvider: process.env.EMBEDDING_FALLBACK_PROVIDER as ProviderType | undefined,
+    required: getEnvOrDefault('EMBEDDINGS_REQUIRED', 'false').toLowerCase() === 'true',
     openai: {
       apiKey: process.env.OPENAI_API_KEY || '',
       model: getEnvOrDefault('OPENAI_EMBEDDING_MODEL', 'text-embedding-3-small'),

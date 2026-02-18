@@ -9,7 +9,9 @@ The WhatsApp Collector is a service that listens to incoming WhatsApp messages a
 - **Type-Based Channels**: Publishes to different Redis channels based on message type
 - **Extended Metadata**: Captures replies, forwards, mentions, group info, and more
 - **Robust Error Handling**: 3-tier approach (log → retry → queue)
+- **Dead-Letter Durability**: Persist unflushed failures to NDJSON for recovery
 - **Graceful Shutdown**: Flushes queued messages before exiting
+- **Duplicate Suppression**: Message ID deduplication across overlapping events
 - **Debug Mode**: Detailed logging for development and troubleshooting
 
 ## Architecture
@@ -56,6 +58,12 @@ FILTER_GROUPS=exclude
 
 # Exclude broadcast messages (default)
 FILTER_BROADCAST=false
+
+# Validate FILTER_CONTACTS entries strictly (fail startup on invalid IDs)
+FILTER_STRICT_VALIDATION=false
+
+# Suppress duplicate message IDs for 10 minutes
+MESSAGE_DEDUPE_WINDOW_MS=600000
 ```
 
 #### Retry & Queue
@@ -69,6 +77,9 @@ RETRY_BACKOFF_MULTIPLIER=2
 # Queue up to 1000 messages locally if Redis is down
 QUEUE_MAX_SIZE=1000
 QUEUE_FLUSH_INTERVAL=60000  # Try to flush every minute
+
+# Persist dropped/unflushed publish records for replay
+QUEUE_DEAD_LETTER_PATH=/usr/src/app/data/publisher-dead-letter.ndjson
 ```
 
 ## Redis Channels
@@ -190,10 +201,10 @@ The service implements a 3-tier error handling strategy:
 - Max queue size configurable (default: 1000 messages)
 - On graceful shutdown, queue is flushed before exit
 
-### Dead Letter Queue (Future)
-- Messages that can't be delivered after queue is full
-- Will be written to disk for manual recovery
-- TODO: Not yet implemented
+### Dead Letter Queue
+- Messages that cannot be queued/flushed are written as NDJSON records
+- Default path: `/usr/src/app/data/publisher-dead-letter.ndjson`
+- Each record contains timestamp, reason, channel, message ID (if available), and payload
 
 ## Local Development
 
@@ -282,11 +293,11 @@ See the main project README for Docker instructions.
 
 - [ ] Media message support (images, videos, audio, documents)
 - [ ] S3 integration for media storage
-- [ ] Dead letter queue for failed messages
+- [x] Dead letter queue for failed messages
 - [ ] HTTP health check endpoint
 - [ ] Prometheus metrics
 - [ ] Unit and integration tests
-- [ ] Message deduplication
+- [x] Message deduplication
 - [ ] Rate limiting
 - [ ] Multi-account support
 

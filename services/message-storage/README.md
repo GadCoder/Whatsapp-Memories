@@ -166,11 +166,16 @@ CREATE INDEX idx_messages_embedding_provider
 ### Embedding Provider Settings
 
 ```bash
-# Primary provider (required)
+# Primary provider
 EMBEDDING_PROVIDER=openai          # or 'gemini'
 
 # Fallback provider (optional)
 EMBEDDING_FALLBACK_PROVIDER=gemini # or 'openai'
+
+# Startup strictness for embeddings
+# false: degraded mode (store messages without embeddings if provider unavailable)
+# true: fail startup when no embedding provider can be initialized
+EMBEDDINGS_REQUIRED=false
 
 # OpenAI Configuration
 OPENAI_API_KEY=sk-xxx
@@ -340,10 +345,8 @@ docker compose logs message-storage
 **Common issues:**
 
 1. **Missing API Key:**
-   ```
-   Error: OPENAI_API_KEY is required when using OpenAI provider
-   ```
-   → Add API key to `.env`
+   - With `EMBEDDINGS_REQUIRED=false`, service starts in degraded mode and stores messages without embeddings.
+   - With `EMBEDDINGS_REQUIRED=true`, startup fails until a valid provider key is configured.
 
 2. **Database Connection Failed:**
    ```

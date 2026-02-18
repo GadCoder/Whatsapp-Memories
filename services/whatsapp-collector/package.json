@@ -6,7 +6,8 @@
   "scripts": {
     "build": "tsc",
     "start": "node dist/WhatsAppCollectorService.js",
-    "dev": "ts-node src/WhatsAppCollectorService.ts"
+    "dev": "ts-node src/WhatsAppCollectorService.ts",
+    "test": "npm run build && node --test dist/tests/*.test.js"
   },
   "keywords": [
     "whatsapp",

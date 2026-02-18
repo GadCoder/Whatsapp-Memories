@@ -51,9 +51,11 @@ services:
       
       # Filter Configuration
       - FILTER_MODE=all                    # Options: all, allowlist, blocklist
-      # - FILTER_CONTACTS=1234567890,0987654321  # Comma-separated (for allowlist/blocklist)
+      # - FILTER_CONTACTS=1234567890@c.us,0987654321@c.us  # Comma-separated WhatsApp IDs
+      - FILTER_STRICT_VALIDATION=false     # Fail fast on invalid FILTER_CONTACTS values
       - FILTER_GROUPS=include              # Options: include, exclude, only
       - FILTER_BROADCAST=false             # Include broadcast messages?
+      - MESSAGE_DEDUPE_WINDOW_MS=600000    # Suppress duplicate message IDs for 10 minutes
       
       # Retry Configuration
       - RETRY_MAX_ATTEMPTS=3
@@ -64,6 +66,7 @@ services:
       # Queue Configuration
       - QUEUE_MAX_SIZE=1000                # Max messages to queue locally
       - QUEUE_FLUSH_INTERVAL=60000         # milliseconds (1 minute)
+      - QUEUE_DEAD_LETTER_PATH=/usr/src/app/data/publisher-dead-letter.ndjson
       
       # Debug
       - DEBUG=true                         # Enable debug logging (set to false in production)
@@ -100,6 +103,7 @@ services:
       # Embedding Provider Configuration
       - EMBEDDING_PROVIDER=${EMBEDDING_PROVIDER:-openai}
       - EMBEDDING_FALLBACK_PROVIDER=${EMBEDDING_FALLBACK_PROVIDER:-}
+      - EMBEDDINGS_REQUIRED=${EMBEDDINGS_REQUIRED:-false}   # true = fail startup if embeddings unavailable
       
       # OpenAI Configuration
       - OPENAI_API_KEY=${OPENAI_API_KEY}
