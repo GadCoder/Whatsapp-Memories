@@ -28,9 +28,9 @@ export const searchSchema = {
             pattern: '^\\d{4}-\\d{2}-\\d{2}$'
           },
           chat_id: { 
-            type: 'string', 
-            format: 'uuid',
-            pattern: '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$'
+            type: 'string',
+            minLength: 1,
+            maxLength: 128
           },
           is_group: { 
             type: 'boolean' 
