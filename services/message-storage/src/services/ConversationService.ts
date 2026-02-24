@@ -34,10 +34,7 @@ export class ConversationService {
     const semanticBreak = await this.detectSemanticBreak(open.id, embedding);
 
     if (gapMinutes > config.conversation.maxGapMinutes || semanticBreak) {
-      await pool.query(
-        `UPDATE conversations SET status = 'closed', updated_at = NOW() WHERE id = $1`,
-        [open.id]
-      );
+      await this.finalizeConversation(open.id);
       await this.createConversation(message, timestamp);
       return;
     }
@@ -110,6 +107,55 @@ export class ConversationService {
        WHERE id = $1`,
       [conversationId, timestamp, message.messageId]
     );
+  }
+
+  private async finalizeConversation(conversationId: string): Promise<void> {
+    const pool = getPool();
+    const messagesResult = await pool.query(
+      `SELECT m.text, m.sender_name, m.timestamp
+       FROM conversation_messages cm
+       JOIN messages m ON m.message_id = cm.message_id
+       WHERE cm.conversation_id = $1
+       ORDER BY m.timestamp ASC
+       LIMIT 20`,
+      [conversationId]
+    );
+
+    const decryptedTexts = messagesResult.rows
+      .map((row) => this.encryption.decrypt(row.text))
+      .filter((text): text is string => Boolean(text && text.trim().length > 0));
+
+    const title = decryptedTexts[0]?.slice(0, 80) ?? 'Conversation';
+    const summary = decryptedTexts.slice(0, 3).join(' | ').slice(0, 512);
+    const topicLabel = this.classifyConversation(decryptedTexts.join(' '));
+
+    await pool.query(
+      `UPDATE conversations
+       SET status = 'closed',
+           title_encrypted = $2,
+           summary_encrypted = $3,
+           topic_label = $4,
+           classification_confidence = $5,
+           updated_at = NOW()
+       WHERE id = $1`,
+      [
+        conversationId,
+        this.encryption.encrypt(title),
+        this.encryption.encrypt(summary),
+        topicLabel,
+        0.65,
+      ]
+    );
+  }
+
+  private classifyConversation(text: string): string {
+    const value = text.toLowerCase();
+    if (!value.trim()) return 'unknown';
+    if (/(macbook|laptop|iphone|android|pc|teclado|monitor|software)/i.test(value)) return 'tech';
+    if (/(precio|compra|comprar|mercado libre|oferta|venta)/i.test(value)) return 'shopping';
+    if (/(reunion|meeting|agenda|mañana|hoy|hora)/i.test(value)) return 'planning';
+    if (/(familia|cumple|amigo|jaja|jajaj)/i.test(value)) return 'casual';
+    return 'general';
   }
 
   private async detectSemanticBreak(conversationId: string, embedding: number[] | null): Promise<boolean> {
