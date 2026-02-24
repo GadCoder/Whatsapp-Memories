@@ -170,3 +170,6 @@ CREATE INDEX IF NOT EXISTS idx_conversation_messages_message_id
 
 CREATE INDEX IF NOT EXISTS idx_conversation_messages_timestamp
   ON conversation_messages(timestamp);
+
+CREATE INDEX IF NOT EXISTS idx_conversation_messages_conv_timestamp
+  ON conversation_messages(conversation_id, timestamp);
