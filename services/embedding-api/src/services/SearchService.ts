@@ -1,4 +1,5 @@
 import { pool } from '../database/connection';
+import pgvector from 'pgvector';
 import { EncryptionService } from './EncryptionService';
 import { logger } from '../utils/logger';
 import { SearchResult } from '../types/search.types';
@@ -29,6 +30,26 @@ export class SearchService {
     const startTime = Date.now();
 
     try {
+      if (!Array.isArray(embedding) || embedding.length === 0) {
+        throw new AppError(
+          ErrorCodes.INVALID_QUERY.code,
+          'Embedding vector is required and cannot be empty',
+          ErrorCodes.INVALID_QUERY.statusCode
+        );
+      }
+
+      const hasInvalidValues = embedding.some((value) => !Number.isFinite(value));
+      if (hasInvalidValues) {
+        throw new AppError(
+          ErrorCodes.INVALID_QUERY.code,
+          'Embedding vector contains invalid numeric values',
+          ErrorCodes.INVALID_QUERY.statusCode
+        );
+      }
+
+      // pgvector expects text format like: [0.1,0.2,...]
+      const queryEmbedding = pgvector.toSql(embedding);
+
       const query = `
         SELECT 
           id, message_id, sender_name, text, timestamp,
@@ -45,7 +66,7 @@ export class SearchService {
       `;
 
       const result = await pool.query(query, [
-        embedding, // Pass array directly, pg will convert
+        queryEmbedding,
         filters?.start_date || null,
         filters?.end_date || null,
         filters?.chat_id || null,
