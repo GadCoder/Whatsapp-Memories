@@ -29,6 +29,11 @@ export interface Config {
     enabled: boolean;
     key: string | null;
   };
+  conversation: {
+    maxGapMinutes: number;
+    semanticDriftThreshold: number;
+    minEmbeddingSimilarity: number;
+  };
   debug: boolean;
 }
 
@@ -72,6 +77,11 @@ export const config: Config = {
   encryption: {
     enabled: !!process.env.ENCRYPTION_KEY && process.env.ENCRYPTION_KEY.length === 64,
     key: process.env.ENCRYPTION_KEY || null,
+  },
+  conversation: {
+    maxGapMinutes: parseInt(getEnvOrDefault('CONVERSATION_MAX_GAP_MINUTES', '90'), 10),
+    semanticDriftThreshold: parseFloat(getEnvOrDefault('CONVERSATION_SEMANTIC_DRIFT_THRESHOLD', '0.30')),
+    minEmbeddingSimilarity: parseFloat(getEnvOrDefault('CONVERSATION_MIN_EMBEDDING_SIMILARITY', '0.70')),
   },
   debug: getEnvOrDefault('DEBUG', 'false').toLowerCase() === 'true',
 };
