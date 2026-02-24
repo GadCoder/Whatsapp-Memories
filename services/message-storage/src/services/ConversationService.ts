@@ -1,4 +1,5 @@
 import crypto from 'crypto';
+import { PoolClient } from 'pg';
 import { config } from '../config/config';
 import { getPool } from '../database/connection';
 import { WhatsAppMessage } from '../types/message.types';
@@ -6,15 +7,13 @@ import { EncryptionService } from './EncryptionService';
 
 interface OpenConversation {
   id: string;
-  started_at: Date;
   ended_at: Date;
-  end_message_id: string;
-  message_count: number;
   participants_encrypted: string | null;
 }
 
 export class ConversationService {
   private encryption: EncryptionService;
+  private lastEmbeddingByConversation = new Map<string, number[]>();
 
   constructor() {
     this.encryption = new EncryptionService();
@@ -22,33 +21,72 @@ export class ConversationService {
 
   async onMessage(message: WhatsAppMessage, embedding: number[] | null): Promise<void> {
     const timestamp = this.toDate(message.timestamp);
-    const pool = getPool();
-    const open = await this.getOpenConversation(message.chatId);
 
-    if (!open) {
-      await this.createConversation(message, timestamp);
-      return;
-    }
+    await this.withChatLock(message.chatId, async (client) => {
+      const open = await this.getOpenConversation(client, message.chatId);
 
-    const gapMinutes = (timestamp.getTime() - new Date(open.ended_at).getTime()) / 60000;
-    const semanticBreak = await this.detectSemanticBreak(open.id, embedding);
+      if (!open) {
+        const newConversationId = await this.createConversation(client, message, timestamp);
+        this.updateEmbeddingCache(newConversationId, embedding);
+        this.log('created', { chatId: message.chatId, conversationId: newConversationId, messageId: message.messageId });
+        return;
+      }
 
-    if (gapMinutes > config.conversation.maxGapMinutes || semanticBreak) {
-      await pool.query(
-        `UPDATE conversations SET status = 'closed', updated_at = NOW() WHERE id = $1`,
-        [open.id]
-      );
-      await this.createConversation(message, timestamp);
-      return;
-    }
+      const gapMinutes = (timestamp.getTime() - new Date(open.ended_at).getTime()) / 60000;
+      const semanticBreak = await this.detectSemanticBreak(client, open.id, embedding);
 
-    await this.appendToConversation(open.id, message, timestamp);
+      if (gapMinutes > config.conversation.maxGapMinutes || semanticBreak) {
+        await client.query(
+          `UPDATE conversations SET status = 'closed', updated_at = NOW() WHERE id = $1`,
+          [open.id]
+        );
+
+        this.lastEmbeddingByConversation.delete(open.id);
+
+        const newConversationId = await this.createConversation(client, message, timestamp);
+        this.updateEmbeddingCache(newConversationId, embedding);
+
+        this.log('closed_and_created', {
+          chatId: message.chatId,
+          closedConversationId: open.id,
+          newConversationId,
+          messageId: message.messageId,
+          gapMinutes,
+          semanticBreak,
+        });
+
+        return;
+      }
+
+      const appended = await this.appendToConversation(client, open, message, timestamp);
+      if (appended) {
+        this.updateEmbeddingCache(open.id, embedding);
+        this.log('appended', { chatId: message.chatId, conversationId: open.id, messageId: message.messageId });
+      }
+    });
   }
 
-  private async getOpenConversation(chatId: string): Promise<OpenConversation | null> {
+  private async withChatLock(chatId: string, fn: (client: PoolClient) => Promise<void>): Promise<void> {
     const pool = getPool();
-    const result = await pool.query(
-      `SELECT id, started_at, ended_at, end_message_id, message_count, participants_encrypted
+    const client = await pool.connect();
+
+    try {
+      await client.query('BEGIN');
+      await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [chatId]);
+      await fn(client);
+      await client.query('COMMIT');
+    } catch (error) {
+      await client.query('ROLLBACK');
+      this.log('error', { chatId, error: error instanceof Error ? error.message : 'unknown' });
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  private async getOpenConversation(client: PoolClient, chatId: string): Promise<OpenConversation | null> {
+    const result = await client.query(
+      `SELECT id, ended_at, participants_encrypted
        FROM conversations
        WHERE chat_id = $1 AND status = 'open'
        ORDER BY ended_at DESC
@@ -59,12 +97,11 @@ export class ConversationService {
     return result.rows[0] ?? null;
   }
 
-  private async createConversation(message: WhatsAppMessage, timestamp: Date): Promise<void> {
-    const pool = getPool();
+  private async createConversation(client: PoolClient, message: WhatsAppMessage, timestamp: Date): Promise<string> {
     const conversationKey = this.buildConversationKey(message.chatId, message.messageId, timestamp);
     const participants = this.collectParticipants(message);
 
-    const insert = await pool.query(
+    const insertConversation = await client.query(
       `INSERT INTO conversations (
         conversation_key, chat_id, started_at, ended_at,
         start_message_id, end_message_id, message_count,
@@ -83,42 +120,81 @@ export class ConversationService {
       ]
     );
 
-    await pool.query(
-      `INSERT INTO conversation_messages (conversation_id, message_id, timestamp)
-       VALUES ($1, $2, $3)
-       ON CONFLICT DO NOTHING`,
-      [insert.rows[0].id, message.messageId, timestamp]
-    );
-  }
+    const conversationId = insertConversation.rows[0].id as string;
 
-  private async appendToConversation(conversationId: string, message: WhatsAppMessage, timestamp: Date): Promise<void> {
-    const pool = getPool();
-
-    await pool.query(
+    await client.query(
       `INSERT INTO conversation_messages (conversation_id, message_id, timestamp)
-       VALUES ($1, $2, $3)
-       ON CONFLICT DO NOTHING`,
+       VALUES ($1, $2, $3)`,
       [conversationId, message.messageId, timestamp]
     );
 
-    await pool.query(
-      `UPDATE conversations
-       SET ended_at = GREATEST(ended_at, $2),
-           end_message_id = $3,
-           message_count = message_count + 1,
-           updated_at = NOW()
-       WHERE id = $1`,
-      [conversationId, timestamp, message.messageId]
-    );
+    return conversationId;
   }
 
-  private async detectSemanticBreak(conversationId: string, embedding: number[] | null): Promise<boolean> {
+  private async appendToConversation(
+    client: PoolClient,
+    open: OpenConversation,
+    message: WhatsAppMessage,
+    timestamp: Date
+  ): Promise<boolean> {
+    const insertResult = await client.query(
+      `INSERT INTO conversation_messages (conversation_id, message_id, timestamp)
+       VALUES ($1, $2, $3)
+       ON CONFLICT DO NOTHING
+       RETURNING 1`,
+      [open.id, message.messageId, timestamp]
+    );
+
+    if ((insertResult.rowCount ?? 0) === 0) {
+      return false;
+    }
+
+    const mergedParticipants = this.mergeParticipants(open.participants_encrypted, this.collectParticipants(message));
+
+    await client.query(
+      `UPDATE conversations
+       SET ended_at = GREATEST(ended_at, $2),
+           end_message_id = CASE WHEN $2 >= ended_at THEN $3 ELSE end_message_id END,
+           message_count = message_count + 1,
+           participants_encrypted = $4,
+           updated_at = NOW()
+       WHERE id = $1`,
+      [open.id, timestamp, message.messageId, this.encryption.encryptArray(mergedParticipants)]
+    );
+
+    return true;
+  }
+
+  private async detectSemanticBreak(
+    client: PoolClient,
+    conversationId: string,
+    embedding: number[] | null
+  ): Promise<boolean> {
     if (!embedding || embedding.length === 0) {
       return false;
     }
 
-    const pool = getPool();
-    const result = await pool.query(
+    const previous = await this.getPreviousEmbedding(client, conversationId);
+    if (!previous || previous.length !== embedding.length) {
+      return false;
+    }
+
+    const similarity = this.cosineSimilarity(previous, embedding);
+    const drift = 1 - similarity;
+
+    return (
+      similarity < config.conversation.minEmbeddingSimilarity ||
+      drift > config.conversation.semanticDriftThreshold
+    );
+  }
+
+  private async getPreviousEmbedding(client: PoolClient, conversationId: string): Promise<number[] | null> {
+    const cached = this.lastEmbeddingByConversation.get(conversationId);
+    if (cached) {
+      return cached;
+    }
+
+    const result = await client.query(
       `SELECT m.embedding
        FROM conversation_messages cm
        JOIN messages m ON m.message_id = cm.message_id
@@ -129,16 +205,38 @@ export class ConversationService {
     );
 
     if ((result.rowCount ?? 0) === 0) {
-      return false;
+      return null;
     }
 
     const previous = result.rows[0].embedding as number[] | null;
-    if (!previous || previous.length !== embedding.length) {
-      return false;
+    if (previous && previous.length > 0) {
+      this.lastEmbeddingByConversation.set(conversationId, previous);
     }
 
-    const similarity = this.cosineSimilarity(previous, embedding);
-    return similarity < config.conversation.minEmbeddingSimilarity;
+    return previous;
+  }
+
+  private updateEmbeddingCache(conversationId: string, embedding: number[] | null): void {
+    if (embedding && embedding.length > 0) {
+      this.lastEmbeddingByConversation.set(conversationId, embedding);
+    }
+  }
+
+  private mergeParticipants(existingEncrypted: string | null, incoming: string[]): string[] {
+    const participants = new Set<string>();
+
+    if (existingEncrypted) {
+      try {
+        const decrypted = this.encryption.decryptArray(existingEncrypted) ?? [];
+        for (const value of decrypted) participants.add(value);
+      } catch {
+        // keep running; we'll rebuild from incoming values
+      }
+    }
+
+    for (const value of incoming) participants.add(value);
+
+    return Array.from(participants).slice(0, 100);
   }
 
   private cosineSimilarity(a: number[], b: number[]): number {
@@ -174,5 +272,10 @@ export class ConversationService {
 
   private toDate(timestamp: Date | string): Date {
     return typeof timestamp === 'string' ? new Date(timestamp) : timestamp;
+  }
+
+  private log(event: string, meta: Record<string, unknown>): void {
+    if (!config.debug) return;
+    console.log(`[Conversation] ${event}`, meta);
   }
 }
