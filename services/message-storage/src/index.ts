@@ -3,6 +3,7 @@ import { initializeDatabase, closeDatabase } from './database/connection';
 import { SubscriberService } from './services/SubscriberService';
 import { EmbeddingService } from './services/embeddings/EmbeddingService';
 import { StorageService } from './services/StorageService';
+import { ConversationService } from './services/ConversationService';
 import { WhatsAppMessage } from './types/message.types';
 import { createTerminator } from './utils/termination';
 
@@ -10,6 +11,7 @@ class MessageStorageService {
   private subscriber: SubscriberService;
   private embedding: EmbeddingService;
   private storage: StorageService;
+  private conversations: ConversationService;
   private messageCount = 0;
   private errorCount = 0;
   private statsInterval: NodeJS.Timeout | null = null;
@@ -20,6 +22,7 @@ class MessageStorageService {
     this.subscriber = new SubscriberService();
     this.embedding = new EmbeddingService();
     this.storage = new StorageService();
+    this.conversations = new ConversationService();
   }
 
   async start(): Promise<void> {
@@ -91,7 +94,10 @@ class MessageStorageService {
 
       // Save to database with provider info
       await this.storage.saveMessage(message, embedding, embeddingProvider);
-      
+
+      // Segment/append conversations after message persistence
+      await this.conversations.onMessage(message, embedding);
+
       this.messageCount++;
       
       if (config.debug) {
