@@ -8,6 +8,7 @@ import { authMiddleware } from './middleware/auth';
 import { healthRoutes } from './routes/health';
 import { searchRoutes } from './routes/search';
 import { statsRoutes } from './routes/stats';
+import { threadRoutes } from './routes/thread';
 
 const MAX_REQUEST_ID_LENGTH = 128;
 
@@ -69,6 +70,7 @@ async function start() {
   app.addHook('onRequest', authMiddleware);
   await app.register(searchRoutes);
   await app.register(statsRoutes);
+  await app.register(threadRoutes);
 
   try {
     await app.listen({ 
