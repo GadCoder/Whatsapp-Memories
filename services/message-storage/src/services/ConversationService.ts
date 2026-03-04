@@ -36,11 +36,7 @@ export class ConversationService {
       const semanticBreak = await this.detectSemanticBreak(client, open.id, embedding);
 
       if (gapMinutes > config.conversation.maxGapMinutes || semanticBreak) {
-        await client.query(
-          `UPDATE conversations SET status = 'closed', updated_at = NOW() WHERE id = $1`,
-          [open.id]
-        );
-
+        await this.finalizeConversation(client, open.id);
         this.lastEmbeddingByConversation.delete(open.id);
 
         const newConversationId = await this.createConversation(client, message, timestamp);
@@ -163,6 +159,78 @@ export class ConversationService {
     );
 
     return true;
+  }
+
+  private async finalizeConversation(client: PoolClient, conversationId: string): Promise<void> {
+    const messagesResult = await client.query(
+      `SELECT m.text, m.timestamp
+       FROM conversation_messages cm
+       JOIN messages m ON m.message_id = cm.message_id
+       WHERE cm.conversation_id = $1
+       ORDER BY m.timestamp ASC
+       LIMIT 20`,
+      [conversationId]
+    );
+
+    const decryptedTexts = messagesResult.rows
+      .map((row) => this.encryption.decrypt(row.text))
+      .filter((text): text is string => Boolean(text && text.trim().length > 0));
+
+    const title = this.pickTitle(decryptedTexts);
+    const summary = decryptedTexts.slice(0, 3).join(' | ').slice(0, 512);
+    const classification = this.classifyConversation(decryptedTexts.join(' '));
+
+    await client.query(
+      `UPDATE conversations
+       SET status = 'closed',
+           title_encrypted = $2,
+           summary_encrypted = $3,
+           topic_label = $4,
+           classification_confidence = $5,
+           updated_at = NOW()
+       WHERE id = $1`,
+      [
+        conversationId,
+        this.encryption.encrypt(title),
+        this.encryption.encrypt(summary),
+        classification.label,
+        classification.confidence,
+      ]
+    );
+  }
+
+  // Intentionally bilingual (Spanish/English) because chats in this workspace are mixed-language.
+  private classifyConversation(text: string): { label: string; confidence: number } {
+    const rules: Array<{ label: string; regex: RegExp }> = [
+      { label: 'tech', regex: /(macbook|laptop|iphone|android|pc|teclado|monitor|software)/i },
+      { label: 'shopping', regex: /(precio|compra|comprar|mercado libre|oferta|venta)/i },
+      { label: 'planning', regex: /(reunion|meeting|agenda|mañana|hoy|hora)/i },
+      { label: 'casual', regex: /(familia|cumple|amigo|jaja|jajaj)/i },
+    ];
+
+    if (!text.trim()) {
+      return { label: 'unknown', confidence: 0 };
+    }
+
+    let matches = 0;
+    let label = 'general';
+
+    for (const rule of rules) {
+      if (rule.regex.test(text)) {
+        matches += 1;
+        if (label === 'general') {
+          label = rule.label;
+        }
+      }
+    }
+
+    const confidence = Math.min(0.95, 0.35 + matches * 0.2);
+    return { label, confidence };
+  }
+
+  private pickTitle(messages: string[]): string {
+    const substantive = messages.find((message) => message.trim().length >= 10);
+    return (substantive ?? messages[0] ?? 'Conversation').slice(0, 80);
   }
 
   private async detectSemanticBreak(
