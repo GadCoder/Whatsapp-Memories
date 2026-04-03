@@ -106,3 +106,70 @@ CREATE INDEX IF NOT EXISTS idx_messages_embedding ON messages
 -- Index on provider for analytics and filtering
 CREATE INDEX IF NOT EXISTS idx_messages_embedding_provider ON messages(embedding_provider) 
     WHERE embedding_provider IS NOT NULL;
+
+-- Conversation aggregates (encrypted summaries + participant snapshots)
+CREATE TABLE IF NOT EXISTS conversations (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    conversation_key TEXT UNIQUE NOT NULL,
+    chat_id TEXT NOT NULL,
+    started_at TIMESTAMPTZ NOT NULL,
+    ended_at TIMESTAMPTZ NOT NULL,
+    start_message_id TEXT NOT NULL,
+    end_message_id TEXT NOT NULL,
+    message_count INTEGER NOT NULL DEFAULT 0,
+
+    -- Encrypted fields (AES-GCM via app layer)
+    participants_encrypted TEXT,
+    summary_encrypted TEXT,
+    title_encrypted TEXT,
+
+    -- Operational metadata (plaintext)
+    topic_label TEXT,
+    classification_confidence REAL,
+    status TEXT NOT NULL DEFAULT 'open',
+
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW(),
+
+    CONSTRAINT fk_conversations_start_message
+      FOREIGN KEY (start_message_id) REFERENCES messages(message_id) ON DELETE RESTRICT,
+    CONSTRAINT fk_conversations_end_message
+      FOREIGN KEY (end_message_id) REFERENCES messages(message_id) ON DELETE RESTRICT,
+    CONSTRAINT chk_conversations_time_range CHECK (ended_at >= started_at),
+    CONSTRAINT chk_conversations_status CHECK (status IN ('open', 'closed', 'merged')),
+    CONSTRAINT chk_conversations_message_count CHECK (message_count >= 0)
+);
+
+CREATE INDEX IF NOT EXISTS idx_conversations_chat_time
+  ON conversations(chat_id, started_at, ended_at);
+
+CREATE INDEX IF NOT EXISTS idx_conversations_status
+  ON conversations(status);
+
+CREATE INDEX IF NOT EXISTS idx_conversations_start_message_id
+  ON conversations(start_message_id);
+
+CREATE INDEX IF NOT EXISTS idx_conversations_end_message_id
+  ON conversations(end_message_id);
+
+-- Membership bridge for deterministic thread reconstruction
+CREATE TABLE IF NOT EXISTS conversation_messages (
+    conversation_id UUID NOT NULL,
+    message_id TEXT NOT NULL,
+    timestamp TIMESTAMPTZ NOT NULL,
+
+    PRIMARY KEY (conversation_id, message_id),
+    CONSTRAINT fk_conversation_messages_conversation
+      FOREIGN KEY (conversation_id) REFERENCES conversations(id) ON DELETE CASCADE,
+    CONSTRAINT fk_conversation_messages_message
+      FOREIGN KEY (message_id) REFERENCES messages(message_id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_conversation_messages_message_id
+  ON conversation_messages(message_id);
+
+CREATE INDEX IF NOT EXISTS idx_conversation_messages_timestamp
+  ON conversation_messages(timestamp);
+
+CREATE INDEX IF NOT EXISTS idx_conversation_messages_conv_timestamp
+  ON conversation_messages(conversation_id, timestamp);
